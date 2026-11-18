@@ -11,6 +11,7 @@
 
   window.__fasihSniffedEndpoint = null;
   window.__fasihSniffedPeriode = null;
+  window.__fasihSniffedParams = {};
 
   // Tangkap event hasil sniffing dari injected-hook.js
   window.addEventListener('__fasih_api_sniffed', (e) => {
@@ -20,7 +21,10 @@
       if (detail.periodeId) {
         window.__fasihSniffedPeriode = detail.periodeId;
       }
-      console.log('%c🎯 [Fasih Scraper] Endpoint Terdeteksi Otomatis:', 'color: #10b981; font-weight: bold;', detail.pathname);
+      if (detail.params) {
+        window.__fasihSniffedParams = detail.params;
+      }
+      console.log('%c🎯 [Fasih Scraper] Endpoint Terdeteksi Otomatis:', 'color: #10b981; font-weight: bold;', detail.pathname, detail.params);
     }
   });
 

@@ -337,8 +337,9 @@ const FasihUI = (() => {
                 <div class="form-group">
                   <label>Ukuran Halaman (Size)</label>
                   <select id="inp-page-size">
+                    <option value="10" selected>10 per hal (paling aman)</option>
                     <option value="25">25 per hal</option>
-                    <option value="50" selected>50 per hal</option>
+                    <option value="50">50 per hal</option>
                     <option value="100">100 per hal</option>
                   </select>
                 </div>
@@ -448,13 +449,19 @@ const FasihUI = (() => {
       const endpoint = inpEndpoint.value.trim();
       const periodeId = inpPeriode.value.includes('(') ? '' : inpPeriode.value.trim();
       const maxPages = inpMaxPages.value ? parseInt(inpMaxPages.value, 10) : Infinity;
-      const pageSize = parseInt(inpPageSize.value, 10) || 50;
+      const pageSize = parseInt(inpPageSize.value, 10) || 10;
+
+      // Ambil parameter filter/wilayah hasil sniffing dari Fasih jika ada
+      const extraParams = window.__fasihSniffedParams ? { ...window.__fasihSniffedParams } : {};
+      delete extraParams.page;
+      delete extraParams.size;
 
       activeTask = new FasihScraperEngine.ScraperTask({
         endpoint,
         periodeId,
         maxPages,
         pageSize,
+        extraParams,
         delayMs: 250,
         onProgress: (info) => {
           statPages.textContent = `Halaman ${info.currentPage} / ${info.totalPages || '?'}`;
