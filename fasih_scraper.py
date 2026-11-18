@@ -29,6 +29,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 DEFAULT_ENDPOINT = "https://fasih-sm.bps.go.id/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode"
 DEFAULT_SURVEY_PERIOD_ID = "fd68e454-ba45-4b85-8205-f3bf777ded24"
 DEFAULT_XSRF_TOKEN = "55edd9d0-2888-4d52-8572-a96445cd513d"
+DEFAULT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Mobile Safari/537.36"
 
 # Daftar 10 Kecamatan resmi di Kabupaten Kepulauan Siau Tagulandang Biaro (7108)
 KECAMATAN_SITARO = [
@@ -124,7 +125,7 @@ class ParallelFasihScraper:
             "Content-Type": "application/json",
             "Origin": "https://fasih-sm.bps.go.id",
             "Referer": f"https://fasih-sm.bps.go.id/app/surveys/a0429e96-51a5-477b-a415-485f9c153004/{survey_period_id}/data",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": DEFAULT_USER_AGENT,
             "X-XSRF-TOKEN": xsrf_token,
             "Cookie": cookie_header
         })
@@ -320,11 +321,20 @@ def main():
 
     args = parser.parse_args()
 
-    cookie = args.cookie or (
-        f"XSRF-TOKEN={args.xsrf}; "
-        "JSESSIONID=00ED19F826396DC2FDF9E14A044174C9; "
-        "SESSION=82285aa4-2720-46ac-87de-767b7340d9e6"
-    )
+    cookie = args.cookie
+    if not cookie and os.path.exists("fresh_cookie.txt"):
+        try:
+            with open("fresh_cookie.txt", "r", encoding="utf-8") as f:
+                cookie = f.read().strip()
+        except Exception:
+            pass
+
+    if not cookie:
+        cookie = (
+            f"XSRF-TOKEN={args.xsrf}; "
+            "JSESSIONID=5E33591C963AFE1F49E0EA3BC3A47EA2; "
+            "SESSION=038c7e0c-dfb4-4a3c-8944-450a15288df7"
+        )
 
     scraper = ParallelFasihScraper(
         cookie_header=cookie,
