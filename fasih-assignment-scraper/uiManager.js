@@ -314,8 +314,11 @@ const FasihUI = (() => {
           <div class="modal-body">
             <div id="config-section">
               <div class="form-group">
-                <label>Periode ID (Otomatis)</label>
-                <input type="text" id="inp-periode" placeholder="Mendeteksi dari URL..." readonly />
+                <label>Periode ID (UUID)</label>
+                <input type="text" id="inp-periode" placeholder="Contoh: fd68e454-ba45-4b85-8205-..." />
+                <small style="font-size: 11px; color: var(--text-muted); display: block; margin-top: 4px;">
+                  Otomatis terisi jika terdeteksi di URL/halaman, atau Anda dapat menempelkannya manual.
+                </small>
               </div>
 
               <div class="form-group">
@@ -404,8 +407,10 @@ const FasihUI = (() => {
     fab.onclick = () => {
       // Auto detect periode
       if (window.FasihScraperEngine) {
-        const detected = FasihScraperEngine.detectPeriodeFromUrl();
-        inpPeriode.value = detected || '(Tidak terdeteksi di URL)';
+        const detected = FasihScraperEngine.detectPeriode();
+        if (detected && !inpPeriode.value) {
+          inpPeriode.value = detected;
+        }
       }
       backdrop.classList.add('open');
     };

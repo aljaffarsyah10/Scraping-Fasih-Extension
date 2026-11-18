@@ -11,13 +11,64 @@
 const FasihScraperEngine = (() => {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  const UUID_REGEX = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
+
   /**
-   * Ekstrak Periode ID dari URL aktif
-   * Format umum URL Fasih: https://fasih-sm.bps.go.id/app/assignment/{periodeId}
+   * Deteksi Periode ID secara cerdas dari berbagai sumber:
+   * 1. Query parameter (?periodeId=..., ?period=...)
+   * 2. Pathname URL (/app/assignment/{uuid})
+   * 3. Hash router (#/...)
+   * 4. SessionStorage / LocalStorage Fasih SM
+   * 5. Elemen dropdown/select di DOM
    */
-  function detectPeriodeFromUrl() {
-    const match = window.location.pathname.match(/\/app\/assignment\/([0-9a-fA-F-]+)/);
-    return match ? match[1] : null;
+  function detectPeriode() {
+    if (typeof window === 'undefined') return null;
+
+    // 1. Cek query parameter di URL
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      for (const key of ['periodeId', 'periodId', 'periode', 'period', 'id_periode', 'idPeriode']) {
+        const val = sp.get(key);
+        if (val && UUID_REGEX.test(val)) return val;
+      }
+    } catch (e) {}
+
+    // 2. Cek pathname URL
+    const pathMatch = window.location.pathname.match(UUID_REGEX);
+    if (pathMatch) return pathMatch[0];
+
+    // 3. Cek hash router
+    const hashMatch = window.location.hash.match(UUID_REGEX);
+    if (hashMatch) return hashMatch[0];
+
+    // 4. Cek sessionStorage / localStorage Fasih
+    try {
+      const storages = [sessionStorage, localStorage];
+      for (const st of storages) {
+        if (!st) continue;
+        for (let i = 0; i < st.length; i++) {
+          const k = st.key(i);
+          if (/period|survey|assignment/i.test(k)) {
+            const v = st.getItem(k);
+            if (v) {
+              const m = v.match(UUID_REGEX);
+              if (m) return m[0];
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 5. Cek elemen select / dropdown di DOM jika ada yang memuat UUID periode
+    try {
+      const selects = document.querySelectorAll('select, [data-value], [role="combobox"]');
+      for (const el of selects) {
+        const val = el.value || el.getAttribute('data-value') || '';
+        if (UUID_REGEX.test(val)) return val.match(UUID_REGEX)[0];
+      }
+    } catch (e) {}
+
+    return null;
   }
 
   /**
@@ -97,7 +148,7 @@ const FasihScraperEngine = (() => {
   class ScraperTask {
     constructor(options = {}) {
       this.endpoint = options.endpoint || '';
-      this.periodeId = options.periodeId || detectPeriodeFromUrl();
+      this.periodeId = options.periodeId || detectPeriode();
       this.pageSize = options.pageSize || 50;
       this.startPage = options.startPage !== undefined ? options.startPage : 0; // 0-based index default
       this.maxPages = options.maxPages || Infinity;
@@ -256,7 +307,8 @@ const FasihScraperEngine = (() => {
   }
 
   return {
-    detectPeriodeFromUrl,
+    detectPeriode,
+    detectPeriodeFromUrl: detectPeriode, // alias backward compatibility
     flattenRecord,
     extractPageMetadata,
     ScraperTask
