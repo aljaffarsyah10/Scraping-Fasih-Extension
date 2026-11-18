@@ -1,107 +1,139 @@
-# Proyek Scraping Web Fasih SM (BPS) — Raw Data Exporter
+# 🏢 Fasih SM (BPS) Scraping & Building Summary System
 
-Proyek ini berisi pengembangan **Ekstensi Google Chrome (Manifest V3)** untuk menarik (*scraping*) daftar penugasan (*assignments*) dan *raw data* dari aplikasi web **Fasih SM (BPS)** secara otomatis, aman, dan mengekspornya langsung ke format **Excel (.xlsx)** atau **CSV**.
+Repositori ini menyediakan solusi lengkap untuk ekstraksi (*scraping*), audit, dan analisis data penugasan (*assignment*) survei ekonomi **SE2026** dari portal **Fasih SM BPS** (khususnya wilayah **Kabupaten Kepulauan Siau Tagulandang Biaro - 7108**).
 
-Proyek ini dibangun berdasarkan rancangan pada [PRD and playbook.md](PRD%20and%20playbook.md) yang dieksekusi secara terstruktur melalui **5 Fase Pengembangan**.
+Sistem ini mencakup dua pilar utama:
+1. **Python Data Pipeline (CLI & Analytics):** Pipeline penarikan data skala besar (35.585+ data), algoritma penanganan limit Elasticsearch server, dan mesin kalkulasi **Rekapitulasi Jumlah Bangunan Fisik Riil per SLS**.
+2. **Browser Extension (Manifest V3):** Ekstensi peramban siap pakai untuk ekspor langsung dari browser (dokumentasi terpisah di [fasih-assignment-scraper/README.md](fasih-assignment-scraper/README.md)).
 
 ---
 
-## 📌 Mengapa Menggunakan Ekstensi Chrome?
+## 📌 Ringkasan Hasil Data Kabupaten Sitaro (SE2026)
 
-1. **Zero Auth Friction:** Memanfaatkan sesi login SSO BPS (`sso.bps.go.id`) yang sudah aktif di peramban pengguna. Tidak perlu memprogram ulang alur login Keycloak/OAuth, token refresh, atau menangani captcha.
-2. **Aman & Read-Only:** Tidak menggunakan izin berbahaya seperti `debugger` (bebas dari pop-up kuning *"Chrome is being debugged"*). Seluruh proses pengambilan data murni *read-only* langsung dari peramban pengguna tanpa perantara server pihak ketiga.
-3. **Preservasi Kode Wilayah (*Leading Zero*):** Kode seperti `"010"` (Kecamatan) dan `"001"` (Desa) tetap tersimpan sebagai string teks di Excel/CSV, tidak terpotong menjadi angka biasa (`10` atau `1`).
-4. **Tahan Batas Akses (*Rate-Limit HTTP 429*):** Dilengkapi sistem *smart throttle* dan *exponential backoff* otomatis saat server Fasih membatasi jumlah request.
-5. **Zero External Dependencies:** Modul pembaca dan pembuat file `.xlsx` dibangun secara mandiri (*pure native OpenXML via Web APIs*), tanpa dependensi npm berukuran besar atau CDN eksternal.
+Dengan arsitektur sharding dinamis, sistem berhasil menarik **100% data** tanpa ada satu pun baris data yang terlewat:
+
+| Metrik | Angka Server BPS | Hasil di Master Data | Keterangan |
+| :--- | :---: | :---: | :--- |
+| **Total Assignment (Keluarga/Usaha)** | **35.585** | **35.585** | **100.0% Terpenuhi (Lengkap)** |
+| **Total Bangunan Fisik Riil** | - | **21.731** | Dihitung dengan metode *Count Distinct* per SLS |
+| **Satuan Lingkungan Setempat (SLS)** | - | **400 SLS** | Terpetakan di 10 kecamatan & tingkat kab |
+
+### Tabel Rekapitulasi per Kecamatan
+
+| Kode Wilayah | Nama Kecamatan | Total Assignment | Total Bangunan Fisik Riil | Rasio Keluarga / Bangunan |
+| :---: | :--- | :---: | :---: | :---: |
+| `7108000` | *Tingkat Kabupaten (EC / Non-SLS)* | 77 | 0 *(Non-fisik)* | - |
+| `7108100` | **BIARO** | 1.572 | **913** | 1.72 |
+| `7108030` | **SIAU BARAT** | 5.198 | **2.788** | 1.86 |
+| `7108050` | **SIAU BARAT SELATAN** | 2.421 | **1.503** | 1.61 |
+| `7108060` | **SIAU BARAT UTARA** | 1.876 | **1.187** | 1.58 |
+| `7108040` | **SIAU TENGAH** | 998 | **628** | 1.59 |
+| `7108020` | **SIAU TIMUR** | 8.813 | **5.613** | 1.57 |
+| `7108010` | **SIAU TIMUR SELATAN** | 4.290 | **2.630** | 1.63 |
+| `7108070` | **TAGULANDANG** | 6.026 | **3.784** | 1.59 |
+| `7108090` | **TAGULANDANG SELATAN** | 2.308 | **1.382** | 1.67 |
+| `7108080` | **TAGULANDANG UTARA** | 2.006 | **1.303** | 1.54 |
+| **TOTAL** | **KAB. SITARO** | **35.585** | **21.731** | **1.64** |
 
 ---
 
 ## 🗂️ Struktur Direktori Proyek
 
-```
-Scraping-Fasih/
+```text
+D:\10Project\Scraping-Fasih\
 │
-├── fasih-assignment-scraper/     # 📦 FOLDER EKSTENSI CHROME SIAP PAKAI
-│   ├── manifest.json              # Konfigurasi ekstensi Chrome Manifest V3
-│   ├── content.js                 # Entry point & observer navigasi SPA Fasih
-│   ├── scraperEngine.js           # Mesin pagination & proteksi rate limit 429
-│   ├── uiManager.js               # Antarmuka Floating Action Button & Modal (Shadow DOM)
-│   ├── exporter.js                # Generator OpenXML (.xlsx) & CSV dengan UTF-8 BOM
-│   ├── icons/                     # Ikon ekstensi (16x16, 48x48, 128x128)
-│   └── README.md                  # Panduan khusus pemakaian ekstensi
+├── output/                                              # 📁 FOLDER OUTPUT HASIL AKHIR
+│   ├── Master_Rekap_Bangunan_SE2026_Sitaro.xlsx         # 📊 Master Workbook Excel (Rekap SLS + 35k Data)
+│   ├── Master_Data_Assignment_SE2026_Sitaro.csv         # 📄 Master Dataset CSV (35.585 baris data)
+│   └── raw_archive/                                     # 📦 Arsip CSV mentah historis
+│       ├── Raw_Assignment_SE2026_Full_20261118_130132.csv (103 MB)
+│       └── ...
 │
-├── Referensi-fasih-inject-lk/    # 📁 Folder referensi ekstensi inject LK sebelumnya
-├── PRD and playbook.md           # 📄 Dokumen PRD dan Playbook 5 Fase
-├── phase1-sniffer.js             # 🔍 Script inspeksi/sniffer endpoint di Console Fasih (Fase 1)
-├── spesifikasi_api_fasih.md      # 📋 Catatan spesifikasi API dan pemetaan kolom (Fase 1)
-├── scraperEngine.js              # ⚙️ Modul engine scraping utama (Fase 2)
-├── test-scraper-engine.mjs       # 🧪 Unit test Node.js untuk engine (Fase 2)
-├── uiManager.js                  # 🎨 Modul antarmuka UI Shadow DOM (Fase 3)
-├── demo-ui.html                  # 🖥️ Halaman demo simulasi UI di browser lokal (Fase 3)
-├── exporter.js                   # 📊 Modul generator file .xlsx dan .csv (Fase 4)
-├── test-exporter.mjs             # 🧪 Unit test Node.js untuk exporter (Fase 4)
-└── README.md                     # 📖 Dokumentasi utama proyek ini
+├── scripts/                                             # 🛠️ SKRIP PENDUKUNG & AUDIT
+│   ├── audit_server_exact.py                            # Verifikasi jumlah total hit & agregasi status server
+│   ├── compare_server_master.py                         # Cek silang data server vs data lokal per kecamatan
+│   ├── harvest_100_percent_sitaro.py                    # Mesin dynamic sharding untuk menarik 100% data
+│   ├── export_rekap_final.py                            # Generator file Excel master berformat rapi
+│   ├── fetch_complete_35k.py                            # Penarikan berbasis partisi status & wilayah
+│   └── diagnosa_open.py                                 # Diagnosa penugasan status OPEN
+│
+├── fasih_scraper.py                                     # 🚀 Skrip CLI scraper mandiri (Python)
+├── rekap_bangunan_sls.py                                # 🏢 Kalkulator Rekapitulasi Bangunan Fisik Riil SLS
+├── fresh_cookie.txt                                     # 🔑 Penyimpan header cookie sesi Fasih aktif
+├── PRD and playbook.md                                  # 📋 Dokumen PRD dan spesifikasi teknis
+│
+└── fasih-assignment-scraper/                            # 🧩 Folder Ekstensi Browser Chrome (Manifest V3)
 ```
 
 ---
 
-## 🚀 Panduan Instalasi Ekstensi di Chrome
+## ⚙️ Logika Teknis & Solusi Masalah
 
-Untuk memasang ekstensi ini ke Google Chrome atau Microsoft Edge:
+### 1. Masalah Batas Elasticsearch Fasih SM (`max_result_window = 1000`)
+Backend Fasih SM membatasi hasil paginasi data hingga maksimal **1.000 item per kueri** (`start < 1000`). Jika parameter `start >= 1000`, server otomatis mengembalikan `searchData: []` dan `totalHit: 0`.
 
-1. Buka peramban Chrome, lalu buka halaman:
-   ```text
-   chrome://extensions
-   ```
-2. Di pojok kanan atas, hidupkan toggle **"Developer mode"** (Mode pengembang).
-3. Klik tombol **"Load unpacked"** (Muat yang belum dibongkar) di kiri atas.
-4. Pilih folder:
-   ```text
-   D:\10Project\Scraping-Fasih\fasih-assignment-scraper
-   ```
-5. Ekstensi **"Fasih Assignment Raw Exporter"** sekarang telah aktif di Chrome Anda!
+* **Dampak:** Desa-desa berpenduduk padat (seperti Kelurahan *Balehumara*, *Paniki*, *Tarorane*, *Tatehadeng*, dan *Akesimbeka*) yang memiliki $> 1.000$ s.d. $1.600$ penugasan akan terpotong datanya jika ditarik per desa.
+* **Solusi (`scripts/harvest_100_percent_sitaro.py`):**
+  Sistem secara otomatis mendeteksi desa dengan `totalHit > 1000`, lalu melakukan **Dynamic Sharding per SLS** (`0000` s.d. `0025`). Setiap SLS rata-rata hanya memiliki 30–300 data, sehingga tidak pernah menyentuh limit 1.000 dan seluruh 35.585 data berhasil terambil 100%.
 
----
-
-## 💡 Cara Penggunaan di Web Fasih SM
-
-1. Buka dan login ke web Fasih SM di [https://fasih-sm.bps.go.id/app/](https://fasih-sm.bps.go.id/app/).
-2. Masuk ke menu **Daftar Penugasan / Assignment** pada periode yang ingin ditarik datanya.
-3. Di pojok kanan bawah, klik tombol biru **"📥 Ekspor Raw Assignment"**.
-4. Sebuah dialog kontrol akan terbuka:
-   * **Periode ID:** Otomatis terbaca dari URL aktif.
-   * **Maks Halaman:** Biarkan kosong untuk mengambil seluruh data, atau isi angka (misal: `3`) untuk uji coba awal.
-   * **Ukuran Halaman:** Pilih `25`, `50`, atau `100` baris per request.
-   * **Format:** Pilih **Excel (.xlsx)** atau **CSV**.
-5. Klik **"🚀 Mulai Ekspor"**.
-6. Progres penarikan data akan tampil secara real-time. Anda dapat menekan **"⏸️ Jeda"** atau **"🛑 Batalkan"** kapan saja.
-7. Setelah selesai, file akan terunduh otomatis ke folder *Downloads* Anda.
+### 2. Penghitungan Bangunan Fisik Riil (`rekap_bangunan_sls.py`)
+Dalam sensus/survei, nomor bangunan fisik dicatat di kolom `data3` (contoh: `"13 / "` atau `"15 / 13084791"`):
+- **Bukan Sekadar Nomor Terbesar (Max):** Nomor urut bangunan di lapangan dapat melompat/terlewat akibat dinamika lapangan. Mengambil nilai Max akan menghasilkan angka semu yang berlebih.
+- **Bukan Jumlah Baris Penugasan:** Beberapa keluarga/usaha dapat bertempat tinggal di dalam 1 bangunan fisik yang sama (1 bangunan fisik dihuni 2 keluarga). Menghitung total baris akan menyebabkan *double counting*.
+- **Metode yang Digunakan:**
+  1. Membersihkan string nomor bangunan murni (memotong karakter setelah garis miring `/`).
+  2. Melakukan operasi **`COUNT DISTINCT`** pada nomor bangunan bersih di setiap SLS.
+  3. Mengurutkan daftar nomor bangunan secara alfanumerik (`1, 2, 3, ..., 13, 13A, 13B`) dengan tuple sorting agar terhindar dari *TypeError*.
 
 ---
 
-## 🧪 Pengujian & Validasi
+## 🚀 Panduan Menjalankan Script Python
 
-Proyek ini dilengkapi dengan skrip pengujian otomatis (Unit Testing) berbasis Node.js:
-
-### 1. Uji Mesin Scraping (Fase 2)
-Menguji logika pemipihan (*flattening*) struktur JSON bersarang dan deteksi pagination:
+Pastikan dependensi Python telah terpasang:
 ```bash
-node test-scraper-engine.mjs
+pip install pandas openpyxl requests urllib3
 ```
-*(Hasil: 10/10 pengujian berhasil)*
 
-### 2. Uji Exporter Spreadsheet (Fase 4)
-Menguji validitas file OpenXML `.xlsx`, proteksi *leading zero*, dan kompatibilitas karakter khusus:
+### A. Menjalankan Rekapitulasi Bangunan Fisik
+Untuk menghitung ulang rekapitulasi bangunan fisik riil per SLS dari dataset master:
 ```bash
-node test-exporter.mjs
+python rekap_bangunan_sls.py
 ```
-*(Hasil: 10/10 pengujian berhasil)*
+*Skrip otomatis membaca [output/Master_Data_Assignment_SE2026_Sitaro.csv](output/Master_Data_Assignment_SE2026_Sitaro.csv) dan menghasilkan rekapitulasi ke format Excel.*
 
-### 3. Uji Pratinjau Antarmuka UI (Fase 3)
-Cukup buka berkas [demo-ui.html](demo-ui.html) langsung di peramban web (klik ganda file atau buka via Chrome) untuk mencoba interaksi tombol dan dialog modal tanpa perlu login ke Fasih SM.
+### B. Memeriksa Audit Status Server Fasih
+Untuk mengecek agregasi seluruh status penugasan yang tercatat di server BPS:
+```bash
+python scripts/audit_server_exact.py
+```
+
+### C. Menjalankan Pengecekan Selisih Server vs Master Lokal
+Untuk membandingkan jumlah data di server BPS dengan file lokal kita per kecamatan:
+```bash
+python scripts/compare_server_master.py
+```
+
+### D. Menjalankan Ulang Penarikan Data (Scraping)
+Jika sesi cookie berubah atau ingin memperbarui data:
+1. Salin cookie sesi terbaru dari browser (DevTools Network tab saat mengakses Fasih SM) dan simpan ke file `fresh_cookie.txt`.
+2. Jalankan harvester lengkap:
+   ```bash
+   python scripts/harvest_100_percent_sitaro.py
+   ```
 
 ---
 
-## 🛡️ Tata Kelola Data & Keamanan
-* Ekstensi ini tidak mengirimkan data survei atau kredensial apa pun ke server luar (*100% Client-Side In-Memory*).
-* Sesuai dengan prinsip kerahasiaan data statistik dan keamanan operasional BPS.
+## 📊 Format Output Data
+
+### 1. Excel Master ([output/Master_Rekap_Bangunan_SE2026_Sitaro.xlsx](output/Master_Rekap_Bangunan_SE2026_Sitaro.xlsx))
+- **Sheet `Rekap_Bangunan_per_SLS`:**
+  - `nama_kecamatan`, `nama_desa`, `kode_sls`, `nama_sls`
+  - `total_assignment`: Jumlah keluarga/penugasan di SLS tersebut.
+  - `total_bangunan_fisik`: Jumlah bangunan fisik riil (*Count Distinct*).
+  - `daftar_nomor_bangunan`: Daftar seluruh nomor urut bangunan fisik yang terdata (urut alfanumerik).
+  - `rasio_keluarga_per_bangunan`: Rata-rata beban keluarga per bangunan.
+- **Sheet `Semua_Assignment`:**
+  - 35.585 baris data mentah penugasan dengan preservasi teks untuk kolom ID, Kode SLS, Alamat, Nama Keluarga, dan Status Penugasan.
+
+### 2. CSV Master ([output/Master_Data_Assignment_SE2026_Sitaro.csv](output/Master_Data_Assignment_SE2026_Sitaro.csv))
+- Dataset tabular lengkap 35.585 baris dengan format standar UTF-8 yang siap diolah untuk analisis data lebih lanjut atau sistem GIS/database spasial.
