@@ -175,18 +175,18 @@ const FasihScraperEngine = (() => {
    * Kolom standar DataTables tabel penugasan Fasih SM
    */
   const DEFAULT_DATATABLE_COLUMNS = [
-    { data: 'id', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
-    { data: 'codeIdentity', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
-    { data: 'data1', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
-    { data: 'data2', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
-    { data: 'data3', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
-    { data: 'data4', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
-    { data: 'data5', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
-    { data: 'data6', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
-    { data: 'data7', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
-    { data: 'data8', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
-    { data: 'data9', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
-    { data: 'data10', name: '', searchable: true, orderable: true, search: { value: '', regex: false } }
+    { data: 'id', orderable: true },
+    { data: 'codeIdentity', orderable: true },
+    { data: 'data1', orderable: true },
+    { data: 'data2', orderable: true },
+    { data: 'data3', orderable: true },
+    { data: 'data4', orderable: true },
+    { data: 'data5', orderable: true },
+    { data: 'data6', orderable: true },
+    { data: 'data7', orderable: true },
+    { data: 'data8', orderable: true },
+    { data: 'data9', orderable: true },
+    { data: 'data10', orderable: true }
   ];
 
   /**
@@ -266,17 +266,22 @@ const FasihScraperEngine = (() => {
       
       const baseHeaders = {
         'Accept': '*/*',
-        'X-Requested-With': 'XMLHttpRequest',
+        'Accept-Language': 'en-US,en;q=0.9',
         ...this.customHeaders
       };
       if (xsrfToken) {
         baseHeaders['x-xsrf-token'] = xsrfToken;
+        baseHeaders['X-XSRF-TOKEN'] = xsrfToken;
       }
 
       let fetchUrl = '';
       let fetchOptions = {
+        mode: 'cors',
         credentials: 'include'
       };
+      if (typeof window !== 'undefined' && window.location && window.location.href) {
+        fetchOptions.referrer = window.location.href;
+      }
 
       if (isPost) {
         baseHeaders['Content-Type'] = 'application/json';
