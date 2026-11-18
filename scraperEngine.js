@@ -467,9 +467,9 @@ const FasihScraperEngine = (() => {
               await sleep(this.delayMs);
             }
           } else {
-            // Jika > 1000, partisi ke tingkat Desa (001 s.d 025)
+            // Jika > 1000, partisi ke tingkat Desa (001 s.d 040)
             this.onLog(`   ⚠️ Data kecamatan (${kecTotal}) > 1000. Mempartisi per Desa...`);
-            for (let d = 1; d <= 25; d++) {
+            for (let d = 1; d <= 40; d++) {
               if (this.isAborted) break;
               const desaCode = `${kecCode}${String(d).padStart(3, '0')}`;
               const probeDesa = await this.fetchSinglePage(0, desaCode);
@@ -477,26 +477,61 @@ const FasihScraperEngine = (() => {
               const desaTotal = desaMeta.totalItems || 0;
               if (desaTotal === 0) continue;
 
-              let pIdx = 0;
-              const pMax = Math.ceil(desaTotal / this.pageSize);
-              while (!this.isAborted && pIdx < pMax) {
-                const res = await this.fetchSinglePage(pIdx, desaCode);
-                const m = extractPageMetadata(res, this.pageSize);
-                if (!m.items || m.items.length === 0) break;
-                for (const it of m.items) {
-                  if (it.id && !recordMap.has(it.id)) {
-                    recordMap.set(it.id, flattenRecord(it));
+              if (desaTotal < 1000) {
+                let pIdx = 0;
+                const pMax = Math.ceil(desaTotal / this.pageSize);
+                while (!this.isAborted && pIdx < pMax) {
+                  const res = await this.fetchSinglePage(pIdx, desaCode);
+                  const m = extractPageMetadata(res, this.pageSize);
+                  if (!m.items || m.items.length === 0) break;
+                  for (const it of m.items) {
+                    if (it.id && !recordMap.has(it.id)) {
+                      recordMap.set(it.id, flattenRecord(it));
+                    }
+                  }
+                  pIdx++;
+                  this.onProgress({
+                    currentPage: recordMap.size,
+                    totalPages: totalElements,
+                    totalElements: totalElements,
+                    fetchedCount: recordMap.size,
+                    percent: Math.min(100, Math.round((recordMap.size / totalElements) * 100))
+                  });
+                  await sleep(this.delayMs);
+                }
+              } else {
+                // Desa Padat (>= 1000), partisi ke tingkat SLS (0001 - 0025)
+                this.onLog(`      🏘️ [${desaCode}] Desa Padat (${desaTotal} data). Mempartisi per SLS...`);
+                for (let s = 1; s <= 25; s++) {
+                  if (this.isAborted) break;
+                  const slsCode = `${desaCode}${String(s).padStart(4, '0')}`;
+                  const probeSls = await this.fetchSinglePage(0, slsCode);
+                  const slsMeta = extractPageMetadata(probeSls, this.pageSize);
+                  const slsTotal = slsMeta.totalItems || 0;
+                  if (slsTotal === 0) continue;
+
+                  let pIdx = 0;
+                  const pMax = Math.ceil(slsTotal / this.pageSize);
+                  while (!this.isAborted && pIdx < pMax) {
+                    const res = await this.fetchSinglePage(pIdx, slsCode);
+                    const m = extractPageMetadata(res, this.pageSize);
+                    if (!m.items || m.items.length === 0) break;
+                    for (const it of m.items) {
+                      if (it.id && !recordMap.has(it.id)) {
+                        recordMap.set(it.id, flattenRecord(it));
+                      }
+                    }
+                    pIdx++;
+                    this.onProgress({
+                      currentPage: recordMap.size,
+                      totalPages: totalElements,
+                      totalElements: totalElements,
+                      fetchedCount: recordMap.size,
+                      percent: Math.min(100, Math.round((recordMap.size / totalElements) * 100))
+                    });
+                    await sleep(this.delayMs);
                   }
                 }
-                pIdx++;
-                this.onProgress({
-                  currentPage: recordMap.size,
-                  totalPages: totalElements,
-                  totalElements: totalElements,
-                  fetchedCount: recordMap.size,
-                  percent: Math.min(100, Math.round((recordMap.size / totalElements) * 100))
-                });
-                await sleep(this.delayMs);
               }
             }
           }

@@ -215,7 +215,7 @@ class ParallelFasihScraper:
         return len(collected), total_hit or 0
 
     def process_kecamatan(self, kec_code, kec_name):
-        """Memproses satu kecamatan secara paralel: mempartisi ke desa jika > 1.000"""
+        """Memproses satu kecamatan secara paralel: mempartisi ke desa, dan ke SLS jika desa >= 1.000"""
         probe = self.fetch_api(search_val=kec_code, start=0, length=1)
         kec_total = probe.get("totalHit", 0)
 
@@ -228,17 +228,30 @@ class ParallelFasihScraper:
             self.log(f"   ✓ [{kec_name}] Selesai: {fetched} data.")
             return kec_name, fetched, kec_total
         else:
-            self.log(f"   ⚠️ [{kec_name}] Total: {kec_total} data (>1000). Mempartisi per desa...")
+            self.log(f"   ⚠️ [{kec_name}] Total: {kec_total} data (>1000). Mempartisi per desa (001-040)...")
             kec_collected = 0
-            for d in range(1, 26):
+            for d in range(1, 41):
                 desa_code = f"{kec_code}{d:03d}"
                 d_probe = self.fetch_api(search_val=desa_code, start=0, length=1)
                 desa_total = d_probe.get("totalHit", 0)
                 if desa_total == 0:
                     continue
 
-                d_fetched, _ = self.fetch_slice_to_end(desa_code, desa_code)
-                kec_collected += d_fetched
+                if desa_total < 1000:
+                    # Desa aman (< 1000), tarik langsung
+                    d_fetched, _ = self.fetch_slice_to_end(desa_code, desa_code)
+                    kec_collected += d_fetched
+                else:
+                    # Desa padat (>= 1000), partisi ke tingkat SLS (0001 - 0025) agar tidak terpotong!
+                    self.log(f"      🏘️ [{desa_code}] Desa Padat ({desa_total} >= 1000). Mempartisi per SLS...")
+                    for s in range(1, 26):
+                        sls_code = f"{desa_code}{s:04d}"
+                        s_probe = self.fetch_api(search_val=sls_code, start=0, length=1)
+                        sls_total = s_probe.get("totalHit", 0)
+                        if sls_total == 0:
+                            continue
+                        s_fetched, _ = self.fetch_slice_to_end(sls_code, sls_code)
+                        kec_collected += s_fetched
 
             self.log(f"   ✓ [{kec_name}] Selesai seluruh desa: {kec_collected} / {kec_total} data.")
             return kec_name, kec_collected, kec_total
