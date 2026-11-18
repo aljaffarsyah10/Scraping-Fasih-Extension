@@ -1,7 +1,7 @@
 /**
  * Fasih Injected Hook (Main World)
  * Berjalan langsung di window context halaman Fasih SM sebelum skrip web berjalan.
- * Mengamati request API Fasih secara pasif untuk menangkap endpoint, parameter, dan header asli.
+ * Mengamati request API Fasih secara pasif untuk menangkap endpoint, parameter, XSRF token, dan payload asli.
  */
 
 (() => {
@@ -9,10 +9,41 @@
   window.__fasihMainHookLoaded = true;
 
   window.__fasihLastCaptured = null;
+  window.__fasihSniffedToken = null;
+
+  // 1. Ekstrak XSRF token dari cookie langsung saat script mulai
+  function tryReadXsrfCookie() {
+    try {
+      const m = document.cookie.match(/(?:^|;\s*)(?:XSRF-TOKEN|XSRF_TOKEN|_csrf|CSRF-TOKEN)=([^;]+)/i);
+      if (m && m[1]) {
+        window.__fasihSniffedToken = decodeURIComponent(m[1]);
+      }
+    } catch (e) {}
+  }
+  tryReadXsrfCookie();
 
   function notifyDetected(url, method, headers, body) {
     if (!url || typeof url !== 'string') return;
-    if (url.includes('/api/') && (url.includes('assignment') || url.includes('penugasan') || url.includes('filter') || url.includes('list'))) {
+
+    // Normalisasi headers
+    const plainHeaders = {};
+    if (headers instanceof Headers) {
+      headers.forEach((v, k) => { plainHeaders[k.toLowerCase()] = v; });
+    } else if (headers && typeof headers === 'object') {
+      for (const [k, v] of Object.entries(headers)) {
+        if (v) plainHeaders[k.toLowerCase()] = v;
+      }
+    }
+
+    // Tangkap XSRF token dari header apapun yang lewat
+    for (const [k, v] of Object.entries(plainHeaders)) {
+      if (/xsrf|csrf/i.test(k) && v) {
+        window.__fasihSniffedToken = v;
+      }
+    }
+
+    // Tangkap endpoint daftar penugasan
+    if (url.includes('/api/') && (url.includes('assignment') || url.includes('datatable') || url.includes('penugasan'))) {
       try {
         const origin = window.location.origin;
         const u = new URL(url, origin);
@@ -33,14 +64,6 @@
           periodeId = bodyObj.assignmentExtraParam.surveyPeriodId;
         }
 
-        // Normalisasi headers
-        const plainHeaders = {};
-        if (headers instanceof Headers) {
-          headers.forEach((v, k) => { plainHeaders[k] = v; });
-        } else if (headers && typeof headers === 'object') {
-          Object.assign(plainHeaders, headers);
-        }
-
         const detail = {
           fullUrl: url,
           pathname: endpointPath,
@@ -52,7 +75,14 @@
           timestamp: new Date().toISOString()
         };
 
-        window.__fasihLastCaptured = detail;
+        // Simpan hanya request datatable utama ke global
+        if (endpointPath.includes('datatable-all-user-survey-periode') && !endpointPath.includes('aggregation')) {
+          window.__fasihLastCaptured = detail;
+          window.__fasihSniffedEndpoint = endpointPath;
+          if (periodeId) window.__fasihSniffedPeriode = periodeId;
+          if (body) window.__fasihSniffedBody = body;
+        }
+
         window.dispatchEvent(new CustomEvent('__fasih_api_sniffed', { detail }));
       } catch (e) {}
     }
@@ -61,8 +91,16 @@
   // Intercept window.fetch
   const origFetch = window.fetch;
   window.fetch = async function (...args) {
-    const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
-    const options = args[1] || {};
+    let url = '';
+    let options = {};
+    if (typeof args[0] === 'string' || (args[0] && typeof args[0].toString === 'function')) {
+      url = args[0].toString();
+      options = args[1] || {};
+    } else if (args[0] && typeof args[0] === 'object') {
+      url = args[0].url || '';
+      options = args[0];
+    }
+
     const method = options.method || 'GET';
     const headers = options.headers || {};
     notifyDetected(url, method, headers, options.body);
@@ -84,6 +122,9 @@
   XMLHttpRequest.prototype.setRequestHeader = function (header, value) {
     if (!this._headers) this._headers = {};
     this._headers[header] = value;
+    if (/xsrf|csrf/i.test(header) && value) {
+      window.__fasihSniffedToken = value;
+    }
     return origSetReqHeader.apply(this, arguments);
   };
 

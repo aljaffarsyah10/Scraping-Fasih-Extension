@@ -20,29 +20,29 @@
   window.addEventListener('__fasih_api_sniffed', (e) => {
     const detail = e.detail;
     if (detail && detail.pathname) {
-      window.__fasihSniffedEndpoint = detail.pathname;
-      if (detail.periodeId) {
-        window.__fasihSniffedPeriode = detail.periodeId;
+      if (detail.pathname.includes('datatable-all-user-survey-periode') && !detail.pathname.includes('aggregation')) {
+        window.__fasihSniffedEndpoint = detail.pathname;
+        if (detail.periodeId) {
+          window.__fasihSniffedPeriode = detail.periodeId;
+        }
+        if (detail.params) {
+          window.__fasihSniffedParams = detail.params;
+        }
+        if (detail.headers) {
+          window.__fasihSniffedHeaders = detail.headers;
+        }
+        if (detail.body) {
+          window.__fasihSniffedBody = detail.body;
+        }
+        if (detail.method) {
+          window.__fasihSniffedMethod = detail.method;
+        }
+        console.log('%c🎯 [Fasih Scraper] Endpoint Datatable Aktif Terdeteksi:', 'color: #10b981; font-weight: bold;', {
+          endpoint: detail.pathname,
+          method: detail.method,
+          periodeId: detail.periodeId
+        });
       }
-      if (detail.params) {
-        window.__fasihSniffedParams = detail.params;
-      }
-      if (detail.headers) {
-        window.__fasihSniffedHeaders = detail.headers;
-      }
-      if (detail.body) {
-        window.__fasihSniffedBody = detail.body;
-      }
-      if (detail.method) {
-        window.__fasihSniffedMethod = detail.method;
-      }
-      console.log('%c🎯 [Fasih Scraper] Request Terdeteksi:', 'color: #10b981; font-weight: bold;', {
-        endpoint: detail.pathname,
-        method: detail.method,
-        periodeId: detail.periodeId,
-        params: detail.params,
-        headers: detail.headers
-      });
     }
   });
 

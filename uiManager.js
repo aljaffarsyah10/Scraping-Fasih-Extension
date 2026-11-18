@@ -409,19 +409,19 @@ const FasihUI = (() => {
 
     // Buka Modal
     fab.onclick = () => {
-      // Auto detect periode
+      // Auto detect periode (Prioritas surveyPeriodId yang valid)
       if (window.FasihScraperEngine) {
         const detected = FasihScraperEngine.detectPeriode();
-        if (detected && !inpPeriode.value) {
+        if (detected) {
           inpPeriode.value = detected;
         }
       }
 
       // Auto detect endpoint dari sniffer pasif
-      if (window.__fasihSniffedEndpoint && !inpEndpoint.value) {
+      if (window.__fasihSniffedEndpoint) {
         inpEndpoint.value = window.__fasihSniffedEndpoint;
       }
-      if (window.__fasihSniffedPeriode && !inpPeriode.value) {
+      if (window.__fasihSniffedPeriode) {
         inpPeriode.value = window.__fasihSniffedPeriode;
       }
 

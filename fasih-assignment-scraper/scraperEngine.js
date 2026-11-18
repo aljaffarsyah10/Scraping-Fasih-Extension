@@ -14,18 +14,46 @@ const FasihScraperEngine = (() => {
   const UUID_REGEX = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
 
   /**
-   * Mengambil token XSRF dari cookie peramban
+   * Mengambil token XSRF dari berbagai sumber (Cookie, Hook, Meta, Storage)
    */
   function getXsrfToken() {
+    // 1. Cek dari window.__fasihSniffedToken (paling akurat dari sniffer)
+    if (typeof window !== 'undefined' && window.__fasihSniffedToken) {
+      return window.__fasihSniffedToken;
+    }
+
+    // 2. Cek cookie peramban
     if (typeof document !== 'undefined' && document.cookie) {
       try {
-        const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/i);
-        if (match) return decodeURIComponent(match[1]);
+        const match = document.cookie.match(/(?:^|;\s*)(?:XSRF-TOKEN|XSRF_TOKEN|_csrf|CSRF-TOKEN)=([^;]+)/i);
+        if (match && match[1]) return decodeURIComponent(match[1]);
       } catch (e) {}
     }
-    if (typeof window !== 'undefined' && window.__fasihSniffedHeaders) {
-      return window.__fasihSniffedHeaders['x-xsrf-token'] || window.__fasihSniffedHeaders['X-XSRF-TOKEN'] || '';
+
+    // 3. Cek meta tag HTML
+    if (typeof document !== 'undefined') {
+      try {
+        const meta = document.querySelector('meta[name*="csrf"], meta[name*="xsrf"]');
+        if (meta && meta.content) return meta.content;
+      } catch (e) {}
     }
+
+    // 4. Cek header tersimpan di session / local storage
+    if (typeof window !== 'undefined') {
+      try {
+        for (const st of [sessionStorage, localStorage]) {
+          if (!st) continue;
+          for (let i = 0; i < st.length; i++) {
+            const k = st.key(i);
+            if (/xsrf|csrf/i.test(k)) {
+              const val = st.getItem(k);
+              if (val && val.length > 10) return val;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
     return '';
   }
 
@@ -44,14 +72,14 @@ const FasihScraperEngine = (() => {
 
     // 2. Cek pola URL /app/surveys/{surveyId}/{periodeId} (UUID kedua adalah surveyPeriodId)
     const surveyPeriodMatch = window.location.pathname.match(/\/app\/surveys\/[0-9a-fA-F-]+\/([0-9a-fA-F-]+)/);
-    if (surveyPeriodMatch) return surveyPeriodMatch[1];
+    if (surveyPeriodMatch && surveyPeriodMatch[1]) return surveyPeriodMatch[1];
 
     // 3. Cek link breadcrumb di DOM yang mengarah ke /app/surveys/{surveyId}/{periodeId}
     try {
       const surveyLinks = document.querySelectorAll('a[href*="/app/surveys/"]');
       for (const a of surveyLinks) {
         const m = (a.getAttribute('href') || '').match(/\/app\/surveys\/[0-9a-fA-F-]+\/([0-9a-fA-F-]+)/);
-        if (m) return m[1];
+        if (m && m[1]) return m[1];
       }
     } catch (e) {}
 
@@ -66,7 +94,7 @@ const FasihScraperEngine = (() => {
 
     // 5. Fallback UUID pertama jika hanya ada satu
     const singleMatch = window.location.pathname.match(/\/app\/surveys\/([0-9a-fA-F-]+)/);
-    if (singleMatch) return singleMatch[1];
+    if (singleMatch && singleMatch[1]) return singleMatch[1];
 
     return 'fd68e454-ba45-4b85-8205-f3bf777ded24';
   }
@@ -205,13 +233,37 @@ const FasihScraperEngine = (() => {
     }
 
     /**
+     * Memastikan token CSRF tersedia sebelum request POST
+     */
+    async ensureCsrfToken() {
+      let token = getXsrfToken();
+      if (!token && typeof window !== 'undefined') {
+        try {
+          this.onLog('🔍 Memperbarui token sesi XSRF dari server...');
+          await fetch('/app/api/survey/api/v1/users/check-user', {
+            method: 'POST',
+            headers: {
+              'Accept': '*/*',
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'include'
+          });
+          token = getXsrfToken();
+        } catch (e) {}
+      }
+      return token;
+    }
+
+    /**
      * Mengambil 1 halaman data dengan retry pintar untuk HTTP 429
      */
     async fetchSinglePage(pageIndex) {
       const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : 'https://fasih-sm.bps.go.id';
       const isPost = this.method === 'POST' || this.endpoint.includes('datatable');
       
-      const xsrfToken = getXsrfToken();
+      const xsrfToken = await this.ensureCsrfToken();
+      
       const baseHeaders = {
         'Accept': '*/*',
         'X-Requested-With': 'XMLHttpRequest',
@@ -249,14 +301,15 @@ const FasihScraperEngine = (() => {
         if (!bodyPayload.order) bodyPayload.order = [];
         if (!bodyPayload.search) bodyPayload.search = { value: '', regex: false };
 
+        const activePeriodeId = this.periodeId || detectPeriode();
         if (!bodyPayload.assignmentExtraParam) {
           bodyPayload.assignmentExtraParam = {
-            surveyPeriodId: this.periodeId,
+            surveyPeriodId: activePeriodeId,
             assignmentErrorStatusType: -1,
             filterTargetType: 'TARGET_ONLY'
           };
-        } else if (this.periodeId) {
-          bodyPayload.assignmentExtraParam.surveyPeriodId = this.periodeId;
+        } else {
+          bodyPayload.assignmentExtraParam.surveyPeriodId = activePeriodeId;
         }
 
         const cleanUrl = new URL(this.endpoint, origin);
@@ -284,7 +337,7 @@ const FasihScraperEngine = (() => {
 
       let attempt = 0;
       const maxAttempts = 5;
-      let backoffWait = 10000; // Mulai dari 10 detik bila kena 429
+      let backoffWait = 10000;
 
       while (attempt < maxAttempts) {
         if (this.isAborted) throw new Error('Dibatalkan oleh pengguna.');
@@ -301,7 +354,7 @@ const FasihScraperEngine = (() => {
             attempt++;
             this.onLog(`⚠️ Terkena limitasi akses Fasih (HTTP 429). Menunggu ${backoffWait / 1000} detik sebelum mencoba lagi (Percobaan ${attempt}/${maxAttempts})...`);
             await sleep(backoffWait);
-            backoffWait *= 1.5; // Exponential backoff
+            backoffWait *= 1.5;
             continue;
           }
 
@@ -313,6 +366,10 @@ const FasihScraperEngine = (() => {
             } catch (e) {
               try { errDetail = await res.text(); } catch (e2) {}
             }
+            console.error('❌ [Fasih Scraper Error Response]', res.status, res.statusText, errDetail, {
+              url: fetchUrl,
+              headers: baseHeaders
+            });
             throw new Error(`HTTP Error ${res.status}: ${res.statusText}${errDetail ? ' (' + errDetail.slice(0, 150) + ')' : ''}`);
           }
 
@@ -340,7 +397,7 @@ const FasihScraperEngine = (() => {
       this.isAborted = false;
       this.collectedData = [];
 
-      this.onLog(`🚀 Memulai scraping daftar assignment...`);
+      this.onLog(`🚀 Memulai penarikan data penugasan...`);
       this.onLog(`📍 Endpoint: ${this.endpoint} (${this.method || 'POST'})`);
       if (this.periodeId) this.onLog(`📅 Periode ID: ${this.periodeId}`);
 
@@ -391,8 +448,9 @@ const FasihScraperEngine = (() => {
   }
 
   return {
+    getXsrfToken,
     detectPeriode,
-    detectPeriodeFromUrl: detectPeriode, // alias backward compatibility
+    detectPeriodeFromUrl: detectPeriode,
     flattenRecord,
     extractPageMetadata,
     DEFAULT_DATATABLE_COLUMNS,

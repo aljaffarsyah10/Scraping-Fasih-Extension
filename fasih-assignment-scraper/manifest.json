@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Fasih Assignment Raw Exporter",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Ekspor daftar assignment & raw data ringkas dari Fasih SM BPS ke Excel (.xlsx) dan CSV dengan 1 klik.",
   "icons": {
     "16": "icons/icon16.png",
@@ -29,6 +29,7 @@
         "uiManager.js",
         "content.js"
       ],
+      "world": "MAIN",
       "run_at": "document_idle"
     }
   ],
