@@ -13,6 +13,8 @@
   window.__fasihSniffedPeriode = null;
   window.__fasihSniffedParams = {};
   window.__fasihSniffedHeaders = {};
+  window.__fasihSniffedBody = null;
+  window.__fasihSniffedMethod = null;
 
   // Tangkap event hasil sniffing dari injected-hook.js
   window.addEventListener('__fasih_api_sniffed', (e) => {
@@ -28,8 +30,16 @@
       if (detail.headers) {
         window.__fasihSniffedHeaders = detail.headers;
       }
+      if (detail.body) {
+        window.__fasihSniffedBody = detail.body;
+      }
+      if (detail.method) {
+        window.__fasihSniffedMethod = detail.method;
+      }
       console.log('%c🎯 [Fasih Scraper] Request Terdeteksi:', 'color: #10b981; font-weight: bold;', {
         endpoint: detail.pathname,
+        method: detail.method,
+        periodeId: detail.periodeId,
         params: detail.params,
         headers: detail.headers
       });

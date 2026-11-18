@@ -14,9 +14,24 @@
     if (!url || typeof url !== 'string') return;
     if (url.includes('/api/') && (url.includes('assignment') || url.includes('penugasan') || url.includes('filter') || url.includes('list'))) {
       try {
-        const u = new URL(url, window.location.origin);
+        const origin = window.location.origin;
+        const u = new URL(url, origin);
         const endpointPath = u.pathname;
-        const periodeId = u.searchParams.get('periodeId') || u.searchParams.get('periodId') || u.searchParams.get('periode');
+        let periodeId = u.searchParams.get('surveyPeriodId') || u.searchParams.get('periodeId') || u.searchParams.get('periodId') || u.searchParams.get('periode');
+
+        // Cek jika surveyPeriodId ada di dalam payload body POST
+        let bodyObj = null;
+        if (body && typeof body === 'string') {
+          try {
+            bodyObj = JSON.parse(body);
+          } catch (e) {}
+        } else if (body && typeof body === 'object') {
+          bodyObj = body;
+        }
+
+        if (!periodeId && bodyObj && bodyObj.assignmentExtraParam && bodyObj.assignmentExtraParam.surveyPeriodId) {
+          periodeId = bodyObj.assignmentExtraParam.surveyPeriodId;
+        }
 
         // Normalisasi headers
         const plainHeaders = {};
@@ -38,7 +53,6 @@
         };
 
         window.__fasihLastCaptured = detail;
-
         window.dispatchEvent(new CustomEvent('__fasih_api_sniffed', { detail }));
       } catch (e) {}
     }

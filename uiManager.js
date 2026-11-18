@@ -464,7 +464,9 @@ const FasihUI = (() => {
         pageSize,
         extraParams,
         customHeaders,
-        delayMs: 250,
+        sniffedBody: window.__fasihSniffedBody,
+        method: window.__fasihSniffedMethod || (endpoint.includes('datatable') ? 'POST' : 'GET'),
+        delayMs: 300,
         onProgress: (info) => {
           statPages.textContent = `Halaman ${info.currentPage} / ${info.totalPages || '?'}`;
           statRows.textContent = `${info.fetchedCount} / ${info.totalElements || '?'} data`;

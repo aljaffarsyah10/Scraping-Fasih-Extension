@@ -1,40 +1,56 @@
-# Deliverable Fase 1: Spesifikasi API Daftar Assignment Fasih SM (Tervalidasi)
+# Spesifikasi Resmi API Fasih SM (Tervalidasi 100%)
 
-Berdasarkan hasil tangkapan riil dari web Fasih SM, berikut adalah spesifikasi resmi endpoint daftar penugasan / assignment:
+Berdasarkan hasil tangkapan riil dari transmisi tabel penugasan Fasih SM:
 
 ---
 
-## 1. Detail Endpoint
+## 1. Detail Endpoint & Protokol
 
-| Parameter | Nilai Resmi |
+| Parameter | Spesifikasi Resmi |
 |---|---|
 | **URL Endpoint** | `/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode` |
 | **Full URL** | `https://fasih-sm.bps.go.id/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode` |
-| **HTTP Method** | `GET` |
-| **Autentikasi** | Browser Cookies / SSO BPS (`credentials: 'include'`) |
-| **Header Wajib** | `accept: application/json`<br>`x-requested-with: XMLHttpRequest` |
+| **HTTP Method** | **`POST`** (Bukan `GET`) |
+| **Content-Type** | `application/json` |
+| **Header Wajib** | `X-XSRF-TOKEN: <token-dari-cookie>`<br>`Accept: */*`<br>`X-Requested-With: XMLHttpRequest` |
+| **Credentials** | `include` (Cookie sesi aktif) |
 
 ---
 
-## 2. Parameter Query (GET)
+## 2. Struktur Payload Body (JSON POST)
 
-| Parameter | Tipe | Nilai Contoh | Keterangan |
-|---|---|---|---|
-| `page` | Integer | `0`, `1`, `2`, ... | Indeks halaman (0-based) |
-| `size` | Integer | `10`, `25`, `50`, `100` | Jumlah baris per halaman |
-| `periodeId` | UUID | `a0429e96-51a5-477b-a415-485f9c153004` | ID Survei / Periode SE2026 |
-
----
-
-## 3. Contoh Request Asli dari Browser
-
-```javascript
-fetch("https://fasih-sm.bps.go.id/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode?page=0&size=50&periodeId=a0429e96-51a5-477b-a415-485f9c153004", {
-  "headers": {
-    "accept": "application/json",
-    "x-requested-with": "XMLHttpRequest"
-  },
-  "method": "GET",
-  "credentials": "include"
-});
+```json
+{
+  "start": 0,
+  "length": 50,
+  "columns": [
+    {"data": "id", "orderable": true},
+    {"data": "codeIdentity", "orderable": true},
+    {"data": "data1", "orderable": true},
+    {"data": "data2", "orderable": true},
+    {"data": "data3", "orderable": true},
+    {"data": "data4", "orderable": true},
+    {"data": "data5", "orderable": true},
+    {"data": "data6", "orderable": true},
+    {"data": "data7", "orderable": true},
+    {"data": "data8", "orderable": true},
+    {"data": "data9", "orderable": true},
+    {"data": "data10", "orderable": true}
+  ],
+  "order": [],
+  "search": {"value": "", "regex": false},
+  "assignmentExtraParam": {
+    "surveyPeriodId": "fd68e454-ba45-4b85-8205-f3bf777ded24",
+    "assignmentErrorStatusType": -1,
+    "filterTargetType": "TARGET_ONLY"
+  }
+}
 ```
+
+---
+
+## 3. Skema Data Respons (DataTables Standard)
+
+- `recordsTotal`: Total data (contoh: `35585`)
+- `recordsFiltered`: Total data terfilter
+- `data`: Array objek baris (`id`, `codeIdentity`, `data1` s.d `data10`, dsb.)

@@ -51,7 +51,7 @@ assert(flattened['petugas_pcl_nama'] === 'Budi', 'Objek petugas tersimpan sebaga
 assert(flattened['tags'] === 'SE2026, PRIORITAS_1', 'Array primitive digabungkan dengan pemisah koma');
 assert(flattened['catatanKosong'] === '', 'Nilai null dikonversi menjadi string kosong');
 
-// 2. Uji Ekstraksi Metadata Pagination Spring Boot / Fasih
+// 2. Uji Ekstraksi Metadata Pagination Spring Boot / REST
 const sampleSpringResponse = {
   status: 'SUCCESS',
   data: {
@@ -71,6 +71,41 @@ assert(meta.items.length === 2, 'Array content berhasil diekstrak');
 assert(meta.totalItems === 120, 'Total elements berhasil terbaca');
 assert(meta.totalPages === 6, 'Total pages berhasil terbaca');
 assert(meta.currentPage === 0, 'Current page index berhasil terbaca');
+
+// 3. Uji Ekstraksi Metadata DataTables Resmi Fasih SM (POST datatable-all-user-survey-periode)
+const sampleDataTablesResponse = {
+  draw: 1,
+  recordsTotal: 35585,
+  recordsFiltered: 35585,
+  data: [
+    {
+      id: 'a1b2c3d4',
+      codeIdentity: 'ID-001',
+      data1: '7108010001001B',
+      data2: 'Toko Maju Jaya',
+      data3: '010'
+    },
+    {
+      id: 'e5f6g7h8',
+      codeIdentity: 'ID-002',
+      data1: '7108010001002B',
+      data2: 'Warung Berkah',
+      data3: '010'
+    }
+  ]
+};
+
+const dtMeta10 = FasihScraperEngine.extractPageMetadata(sampleDataTablesResponse, 10);
+assert(dtMeta10.items.length === 2, 'DataTables: Data array berhasil diekstrak');
+assert(dtMeta10.totalItems === 35585, 'DataTables: recordsTotal 35585 terbaca sebagai totalItems');
+assert(dtMeta10.totalPages === 3559, 'DataTables: totalPages dihitung dengan benar untuk pageSize 10 (35585/10 = 3559)');
+
+const dtMeta50 = FasihScraperEngine.extractPageMetadata(sampleDataTablesResponse, 50);
+assert(dtMeta50.totalPages === 712, 'DataTables: totalPages dihitung dengan benar untuk pageSize 50 (35585/50 = 712)');
+
+// 4. Uji Default Kolom DataTables
+assert(Array.isArray(FasihScraperEngine.DEFAULT_DATATABLE_COLUMNS), 'DEFAULT_DATATABLE_COLUMNS terdefinisi');
+assert(FasihScraperEngine.DEFAULT_DATATABLE_COLUMNS.length >= 10, 'DEFAULT_DATATABLE_COLUMNS memuat kolom penugasan');
 
 console.log(`\n📊 Hasil Uji: ${passed} Berhasil, ${failed} Gagal.`);
 if (failed > 0) process.exit(1);

@@ -2,7 +2,7 @@
  * Fasih Assignment Scraper - Core Fetching Engine (Fase 2)
  * 
  * Modul ini bertanggung jawab:
- * 1. Menarik data assignment per halaman (pagination) via API internal Fasih.
+ * 1. Menarik data assignment per halaman (pagination) via API internal Fasih (Mendukung DataTables POST & REST GET).
  * 2. Mengatur jeda adaptif (throttling) & backoff otomatis saat terkena rate-limit (HTTP 429).
  * 3. Memipihkan (flatten) struktur JSON bersarang menjadi objek datar tabular.
  * 4. Menyediakan antarmuka kontrol (onProgress, pause, resume, abort).
@@ -14,21 +14,39 @@ const FasihScraperEngine = (() => {
   const UUID_REGEX = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
 
   /**
-   * Deteksi Periode ID secara cerdas dari berbagai sumber:
-   * 1. Query parameter (?periodeId=..., ?period=...)
-   * 2. Pathname URL (/app/assignment/{uuid})
-   * 3. Hash router (#/...)
-   * 4. SessionStorage / LocalStorage Fasih SM
-   * 5. Elemen dropdown/select di DOM
+   * Mengambil token XSRF dari cookie peramban
+   */
+  function getXsrfToken() {
+    if (typeof document !== 'undefined' && document.cookie) {
+      try {
+        const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/i);
+        if (match) return decodeURIComponent(match[1]);
+      } catch (e) {}
+    }
+    if (typeof window !== 'undefined' && window.__fasihSniffedHeaders) {
+      return window.__fasihSniffedHeaders['x-xsrf-token'] || window.__fasihSniffedHeaders['X-XSRF-TOKEN'] || '';
+    }
+    return '';
+  }
+
+  /**
+   * Deteksi Periode ID (surveyPeriodId) secara cerdas dari berbagai sumber:
+   * Pada Fasih SM: /app/surveys/{surveyId}/{periodeId}/...
+   * Nilai periodeId yang dibutuhkan API adalah UUID kedua: fd68e454-ba45-4b85-8205-f3bf777ded24
    */
   function detectPeriode() {
-    if (typeof window === 'undefined') return null;
+    if (typeof window === 'undefined') return 'fd68e454-ba45-4b85-8205-f3bf777ded24';
 
-    // 1. Cek pola URL /app/surveys/{surveyId}/... (parameter periodeId di API analitik Fasih memakai UUID ini)
-    const surveyMatch = window.location.pathname.match(/\/app\/surveys\/([0-9a-fA-F-]+)/);
-    if (surveyMatch) return surveyMatch[1];
+    // 1. Cek dari sniffer pasif jika sudah menangkap surveyPeriodId
+    if (window.__fasihSniffedPeriode) {
+      return window.__fasihSniffedPeriode;
+    }
 
-    // 2. Cek link breadcrumb di DOM yang mengarah ke /app/surveys/{surveyId}/{periodeId}
+    // 2. Cek pola URL /app/surveys/{surveyId}/{periodeId} (UUID kedua adalah surveyPeriodId)
+    const surveyPeriodMatch = window.location.pathname.match(/\/app\/surveys\/[0-9a-fA-F-]+\/([0-9a-fA-F-]+)/);
+    if (surveyPeriodMatch) return surveyPeriodMatch[1];
+
+    // 3. Cek link breadcrumb di DOM yang mengarah ke /app/surveys/{surveyId}/{periodeId}
     try {
       const surveyLinks = document.querySelectorAll('a[href*="/app/surveys/"]');
       for (const a of surveyLinks) {
@@ -37,51 +55,20 @@ const FasihScraperEngine = (() => {
       }
     } catch (e) {}
 
-    // 3. Cek query parameter di URL
+    // 4. Cek query parameter di URL
     try {
       const sp = new URLSearchParams(window.location.search);
-      for (const key of ['periodeId', 'periodId', 'periode', 'period', 'id_periode', 'idPeriode']) {
+      for (const key of ['surveyPeriodId', 'periodeId', 'periodId', 'periode', 'period', 'id_periode', 'idPeriode']) {
         const val = sp.get(key);
         if (val && UUID_REGEX.test(val)) return val;
       }
     } catch (e) {}
 
-    // 4. Cek pathname URL lainnya (/app/assignment/{uuid})
-    const pathMatch = window.location.pathname.match(UUID_REGEX);
-    if (pathMatch) return pathMatch[0];
+    // 5. Fallback UUID pertama jika hanya ada satu
+    const singleMatch = window.location.pathname.match(/\/app\/surveys\/([0-9a-fA-F-]+)/);
+    if (singleMatch) return singleMatch[1];
 
-    // 3. Cek hash router
-    const hashMatch = window.location.hash.match(UUID_REGEX);
-    if (hashMatch) return hashMatch[0];
-
-    // 4. Cek sessionStorage / localStorage Fasih
-    try {
-      const storages = [sessionStorage, localStorage];
-      for (const st of storages) {
-        if (!st) continue;
-        for (let i = 0; i < st.length; i++) {
-          const k = st.key(i);
-          if (/period|survey|assignment/i.test(k)) {
-            const v = st.getItem(k);
-            if (v) {
-              const m = v.match(UUID_REGEX);
-              if (m) return m[0];
-            }
-          }
-        }
-      }
-    } catch (e) {}
-
-    // 5. Cek elemen select / dropdown di DOM jika ada yang memuat UUID periode
-    try {
-      const selects = document.querySelectorAll('select, [data-value], [role="combobox"]');
-      for (const el of selects) {
-        const val = el.value || el.getAttribute('data-value') || '';
-        if (UUID_REGEX.test(val)) return val.match(UUID_REGEX)[0];
-      }
-    } catch (e) {}
-
-    return null;
+    return 'fd68e454-ba45-4b85-8205-f3bf777ded24';
   }
 
   /**
@@ -99,7 +86,6 @@ const FasihScraperEngine = (() => {
       } else if (typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date)) {
         flattenRecord(val, propName, res);
       } else if (Array.isArray(val)) {
-        // Jika array berisi string/primitive, gabungkan dengan koma. Jika objek, konversi ke string ringkas.
         if (val.length === 0) {
           res[propName] = '';
         } else if (typeof val[0] !== 'object') {
@@ -115,9 +101,9 @@ const FasihScraperEngine = (() => {
   }
 
   /**
-   * Deteksi letak array data & metadata pagination pada respons JSON
+   * Deteksi letak array data & metadata pagination pada respons JSON (Mendukung DataTables & Spring Boot)
    */
-  function extractPageMetadata(jsonResponse) {
+  function extractPageMetadata(jsonResponse, pageSize = 50) {
     let items = [];
     let totalItems = 0;
     let totalPages = 1;
@@ -127,12 +113,12 @@ const FasihScraperEngine = (() => {
       return { items, totalItems, totalPages, currentPage };
     }
 
-    // Periksa lokasi umum array data di backend Fasih/Spring Boot
+    // 1. Array data baris
     const candidates = [
+      jsonResponse.data && Array.isArray(jsonResponse.data) ? jsonResponse.data : null,
       jsonResponse.data && jsonResponse.data.content,
       jsonResponse.data && jsonResponse.data.assignments,
       jsonResponse.data && jsonResponse.data.list,
-      jsonResponse.data && Array.isArray(jsonResponse.data) ? jsonResponse.data : null,
       jsonResponse.content,
       jsonResponse.assignments,
       jsonResponse.list,
@@ -146,14 +132,34 @@ const FasihScraperEngine = (() => {
       }
     }
 
-    // Cari info total elemen & halaman
-    const root = jsonResponse.data || jsonResponse;
-    totalItems = root.totalElements ?? root.totalItems ?? root.total ?? items.length;
-    totalPages = root.totalPages ?? root.pageCount ?? (totalItems && root.size ? Math.ceil(totalItems / root.size) : 1);
+    // 2. Info total records & halaman
+    const root = (jsonResponse.data && !Array.isArray(jsonResponse.data)) ? jsonResponse.data : jsonResponse;
+    totalItems = jsonResponse.recordsTotal ?? jsonResponse.recordsFiltered ?? root.totalElements ?? root.totalItems ?? root.total ?? items.length;
+    
+    const size = pageSize || root.size || (items.length > 0 ? items.length : 50);
+    totalPages = root.totalPages ?? root.pageCount ?? (totalItems && size ? Math.ceil(totalItems / size) : 1);
     currentPage = root.number ?? root.page ?? root.currentPage ?? 0;
 
     return { items, totalItems, totalPages, currentPage };
   }
+
+  /**
+   * Kolom standar DataTables tabel penugasan Fasih SM
+   */
+  const DEFAULT_DATATABLE_COLUMNS = [
+    { data: 'id', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
+    { data: 'codeIdentity', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
+    { data: 'data1', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
+    { data: 'data2', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
+    { data: 'data3', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
+    { data: 'data4', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
+    { data: 'data5', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
+    { data: 'data6', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
+    { data: 'data7', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
+    { data: 'data8', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
+    { data: 'data9', name: '', searchable: true, orderable: true, search: { value: '', regex: false } },
+    { data: 'data10', name: '', searchable: true, orderable: true, search: { value: '', regex: false } }
+  ];
 
   /**
    * Kelas Pengontrol Scraping
@@ -162,12 +168,14 @@ const FasihScraperEngine = (() => {
     constructor(options = {}) {
       this.endpoint = options.endpoint || '/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode';
       this.periodeId = options.periodeId || detectPeriode();
-      this.pageSize = options.pageSize || 50;
-      this.startPage = options.startPage !== undefined ? options.startPage : 0; // 0-based index default
+      this.pageSize = options.pageSize || 10;
+      this.startPage = options.startPage !== undefined ? options.startPage : 0; // 0-based index
       this.maxPages = options.maxPages || Infinity;
-      this.delayMs = options.delayMs || 250;
+      this.delayMs = options.delayMs || 300;
       this.extraParams = options.extraParams || {};
       this.customHeaders = options.customHeaders || {};
+      this.sniffedBody = options.sniffedBody || (typeof window !== 'undefined' ? window.__fasihSniffedBody : null);
+      this.method = options.method || (this.endpoint.includes('datatable') ? 'POST' : 'GET');
       
       // Callback progres
       this.onProgress = options.onProgress || (() => {});
@@ -200,16 +208,78 @@ const FasihScraperEngine = (() => {
      * Mengambil 1 halaman data dengan retry pintar untuk HTTP 429
      */
     async fetchSinglePage(pageIndex) {
-      const u = new URL(this.endpoint, window.location.origin);
-      u.searchParams.set('page', pageIndex);
-      u.searchParams.set('size', this.pageSize);
-      if (this.periodeId) {
-        u.searchParams.set('periodeId', this.periodeId);
+      const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : 'https://fasih-sm.bps.go.id';
+      const isPost = this.method === 'POST' || this.endpoint.includes('datatable');
+      
+      const xsrfToken = getXsrfToken();
+      const baseHeaders = {
+        'Accept': '*/*',
+        'X-Requested-With': 'XMLHttpRequest',
+        ...this.customHeaders
+      };
+      if (xsrfToken) {
+        baseHeaders['x-xsrf-token'] = xsrfToken;
       }
-      for (const [k, v] of Object.entries(this.extraParams)) {
-        if (v !== undefined && v !== null && v !== '') {
-          u.searchParams.set(k, v);
+
+      let fetchUrl = '';
+      let fetchOptions = {
+        credentials: 'include'
+      };
+
+      if (isPost) {
+        baseHeaders['Content-Type'] = 'application/json';
+
+        // Siapkan struktur body DataTables JSON
+        let bodyPayload = {};
+        if (this.sniffedBody) {
+          try {
+            bodyPayload = typeof this.sniffedBody === 'string' ? JSON.parse(this.sniffedBody) : JSON.parse(JSON.stringify(this.sniffedBody));
+          } catch (e) {
+            bodyPayload = {};
+          }
         }
+
+        bodyPayload.start = pageIndex * this.pageSize;
+        bodyPayload.length = this.pageSize;
+
+        if (!bodyPayload.columns || !Array.isArray(bodyPayload.columns) || bodyPayload.columns.length === 0) {
+          bodyPayload.columns = DEFAULT_DATATABLE_COLUMNS;
+        }
+
+        if (!bodyPayload.order) bodyPayload.order = [];
+        if (!bodyPayload.search) bodyPayload.search = { value: '', regex: false };
+
+        if (!bodyPayload.assignmentExtraParam) {
+          bodyPayload.assignmentExtraParam = {
+            surveyPeriodId: this.periodeId,
+            assignmentErrorStatusType: -1,
+            filterTargetType: 'TARGET_ONLY'
+          };
+        } else if (this.periodeId) {
+          bodyPayload.assignmentExtraParam.surveyPeriodId = this.periodeId;
+        }
+
+        const cleanUrl = new URL(this.endpoint, origin);
+        fetchUrl = cleanUrl.origin + cleanUrl.pathname;
+
+        fetchOptions.method = 'POST';
+        fetchOptions.headers = baseHeaders;
+        fetchOptions.body = JSON.stringify(bodyPayload);
+      } else {
+        const u = new URL(this.endpoint, origin);
+        u.searchParams.set('page', pageIndex);
+        u.searchParams.set('size', this.pageSize);
+        if (this.periodeId) {
+          u.searchParams.set('periodeId', this.periodeId);
+        }
+        for (const [k, v] of Object.entries(this.extraParams)) {
+          if (v !== undefined && v !== null && v !== '') {
+            u.searchParams.set(k, v);
+          }
+        }
+        fetchUrl = u.toString();
+        fetchOptions.method = 'GET';
+        fetchOptions.headers = baseHeaders;
       }
 
       let attempt = 0;
@@ -225,15 +295,7 @@ const FasihScraperEngine = (() => {
         }
 
         try {
-          const res = await fetch(u.toString(), {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-              'X-Requested-With': 'XMLHttpRequest',
-              ...this.customHeaders
-            },
-            credentials: 'include'
-          });
+          const res = await fetch(fetchUrl, fetchOptions);
 
           if (res.status === 429) {
             attempt++;
@@ -279,7 +341,7 @@ const FasihScraperEngine = (() => {
       this.collectedData = [];
 
       this.onLog(`🚀 Memulai scraping daftar assignment...`);
-      this.onLog(`📍 Endpoint: ${this.endpoint}`);
+      this.onLog(`📍 Endpoint: ${this.endpoint} (${this.method || 'POST'})`);
       if (this.periodeId) this.onLog(`📅 Periode ID: ${this.periodeId}`);
 
       let pageIndex = this.startPage;
@@ -288,10 +350,10 @@ const FasihScraperEngine = (() => {
       let pagesProcessed = 0;
 
       while (!this.isAborted && pageIndex < totalPages && pagesProcessed < this.maxPages) {
-        this.onLog(`📄 Mengambil halaman ${pageIndex + 1}...`);
+        this.onLog(`📄 Mengambil halaman ${pageIndex + 1} (Offset baris ${pageIndex * this.pageSize})...`);
         
         const rawJson = await this.fetchSinglePage(pageIndex);
-        const meta = extractPageMetadata(rawJson);
+        const meta = extractPageMetadata(rawJson, this.pageSize);
 
         if (meta.totalPages) totalPages = meta.totalPages;
         if (meta.totalItems) totalElements = meta.totalItems;
@@ -333,6 +395,7 @@ const FasihScraperEngine = (() => {
     detectPeriodeFromUrl: detectPeriode, // alias backward compatibility
     flattenRecord,
     extractPageMetadata,
+    DEFAULT_DATATABLE_COLUMNS,
     ScraperTask
   };
 })();
