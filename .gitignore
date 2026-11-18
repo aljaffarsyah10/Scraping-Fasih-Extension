@@ -9,3 +9,6 @@ desktop.ini
 
 # Test output & captures
 fasih_phase1_capture_*.json
+*.xlsx
+*.csv
+__pycache__/

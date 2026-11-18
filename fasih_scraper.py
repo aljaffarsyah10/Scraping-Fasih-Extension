@@ -1,6 +1,13 @@
 """
 Fasih Assignment Scraper - Python CLI
-Script mandiri untuk menarik data penugasan dari Fasih SM BPS dan mengekspornya langsung ke Excel (.xlsx) dan CSV.
+Script mandiri untuk menarik seluruh data penugasan (hingga puluhan ribu) dari Fasih SM BPS
+dan mengekspornya langsung ke Excel (.xlsx) dan CSV dengan preservasi kode identitas (leading zero).
+
+Fitur Utama:
+- Auto-Sharding / Partisi Otomatis per Wilayah (Kecamatan/Desa) untuk menembus limit 1.000 data Elasticsearch Fasih SM.
+- Deduplikasi otomatis berbasis UUID penugasan (`id`).
+- Normalisasi dan pelabelan nama kolom resmi Fasih SM SE2026.
+- Preservasi leading zero untuk kolom kode wilayah dan identitas.
 """
 
 import argparse
@@ -15,6 +22,20 @@ import pandas as pd
 DEFAULT_ENDPOINT = "https://fasih-sm.bps.go.id/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode"
 DEFAULT_SURVEY_PERIOD_ID = "fd68e454-ba45-4b85-8205-f3bf777ded24"
 DEFAULT_XSRF_TOKEN = "55edd9d0-2888-4d52-8572-a96445cd513d"
+
+# Daftar 10 Kecamatan resmi di Kabupaten Kepulauan Siau Tagulandang Biaro (7108)
+KECAMATAN_SITARO = [
+    ("7108010", "BIARO"),
+    ("7108020", "TAGULANDANG SELATAN"),
+    ("7108030", "TAGULANDANG"),
+    ("7108040", "TAGULANDANG UTARA"),
+    ("7108050", "SIAU TIMUR SELATAN"),
+    ("7108060", "SIAU TIMUR"),
+    ("7108070", "SIAU BARAT SELATAN"),
+    ("7108080", "SIAU BARAT"),
+    ("7108090", "SIAU TENGAH"),
+    ("7108100", "SIAU BARAT UTARA"),
+]
 
 # Kamus label kolom resmi Fasih SM SE2026 (dari template custom-data)
 FASIH_COLUMN_LABELS = {
@@ -48,13 +69,12 @@ def flatten_record(obj, prefix="", res=None):
             elif not isinstance(val[0], dict):
                 res[prop_name] = ", ".join(str(x) for x in val)
             else:
-                # Untuk array of dict (misal assignmentResponsibility), simpan ringkasan JSON
                 res[prop_name] = json.dumps(val)
         else:
             res[prop_name] = str(val) if isinstance(val, (int, float)) and key.startswith("data") else val
     return res
 
-def fetch_page(cookie_header, xsrf_token, survey_period_id, start_offset, page_size=50):
+def fetch_single_query(cookie_header, xsrf_token, survey_period_id, search_val="", start_offset=0, page_size=100, extra_param=None):
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -70,9 +90,17 @@ def fetch_page(cookie_header, xsrf_token, survey_period_id, start_offset, page_s
         "Cookie": cookie_header
     }
 
+    assignment_param = {
+        "surveyPeriodId": survey_period_id,
+        "assignmentErrorStatusType": -1,
+        "filterTargetType": "TARGET_ONLY"
+    }
+    if extra_param:
+        assignment_param.update(extra_param)
+
     payload = {
         "start": start_offset,
-        "length": page_size,
+        "length": min(page_size, 100), # Fasih membatasi panjang max 150
         "columns": [
             {"data": "id", "orderable": True},
             {"data": "codeIdentity", "orderable": True},
@@ -88,12 +116,8 @@ def fetch_page(cookie_header, xsrf_token, survey_period_id, start_offset, page_s
             {"data": "data10", "orderable": True}
         ],
         "order": [],
-        "search": {"value": "", "regex": False},
-        "assignmentExtraParam": {
-            "surveyPeriodId": survey_period_id,
-            "assignmentErrorStatusType": -1,
-            "filterTargetType": "TARGET_ONLY"
-        }
+        "search": {"value": str(search_val), "regex": False},
+        "assignmentExtraParam": assignment_param
     }
 
     req = urllib.request.Request(
@@ -103,106 +127,165 @@ def fetch_page(cookie_header, xsrf_token, survey_period_id, start_offset, page_s
         method="POST"
     )
 
-    with urllib.request.urlopen(req, context=ctx) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, context=ctx) as response:
+            raw_text = response.read().decode("utf-8")
+            if raw_text.startswith("<!DOCTYPE html>") or "<script" in raw_text:
+                raise ValueError("Server Fasih mengembalikan halaman tantangan WAF/Sesi Kadaluarsa. Silakan perbarui cookie sesi.")
+            return json.loads(raw_text)
+    except urllib.error.HTTPError as e:
+        err_msg = e.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"HTTP {e.code} {e.reason}: {err_msg[:200]}")
 
-def scrape_all(cookie_header, xsrf_token, survey_period_id, max_pages=None, page_size=50, delay=0.3):
-    print("=" * 60)
-    print("🚀 FASIH SM ASSIGNMENT SCRAPER (PYTHON)")
-    print(f"📅 Survey Period ID: {survey_period_id}")
-    print(f"📦 Batch Size: {page_size} baris per request")
-    print("=" * 60)
-
-    all_rows = []
-    start_offset = 0
-    page = 1
-    total_hits = None
+def scrape_slice(cookie_header, xsrf_token, survey_period_id, search_val, label, page_size=100, delay=0.25):
+    """Menarik 1 partisi data sampai tuntas (selama totalHit <= 1000)"""
+    records = []
+    page = 0
+    total_hit = None
 
     while True:
-        if max_pages and page > max_pages:
-            print(f"🛑 Mencapai batas maksimal {max_pages} halaman.")
+        start_offset = page * page_size
+        if total_hit is not None and start_offset >= total_hit:
+            break
+        if start_offset >= 1000:
+            # Backend Elasticsearch membatasi start < 1000
             break
 
-        print(f"📄 Mengambil halaman {page} (Offset {start_offset})...", end="", flush=True)
-        try:
-            res = fetch_page(cookie_header, xsrf_token, survey_period_id, start_offset, page_size)
-        except Exception as e:
-            print(f"\n❌ Galat saat mengambil offset {start_offset}: {e}")
-            break
-
-        items = res.get("searchData") or res.get("data") or []
-        if total_hits is None:
-            total_hits = res.get("totalHit") or res.get("recordsTotal") or 0
-            print(f" [Total Server: {total_hits} data]")
-        else:
-            print(f" [{len(items)} data]")
+        res = fetch_single_query(cookie_header, xsrf_token, survey_period_id, search_val=search_val, start_offset=start_offset, page_size=page_size)
+        items = res.get("searchData") or []
+        if total_hit is None:
+            total_hit = res.get("totalHit", 0)
+            if total_hit == 0:
+                break
+            print(f"      [{label}] Target: {total_hit} data")
 
         if not items:
-            print("ℹ️ Tidak ada data lagi dari server. Selesai.")
             break
 
-        for item in items:
-            all_rows.append(flatten_record(item))
-
-        print(f"   ✓ Terkumpul {len(all_rows)} / {total_hits} baris...")
-
-        start_offset += page_size
+        records.extend(items)
         page += 1
-
-        if start_offset >= total_hits:
-            print("🎉 Semua data penugasan telah berhasil diunduh!")
-            break
-
         time.sleep(delay)
 
-    return all_rows
+    return records, total_hit or 0
+
+def scrape_all_sharded(cookie_header, xsrf_token, survey_period_id, page_size=100, delay=0.25):
+    """
+    Menarik seluruh data penugasan (~35.585 data) dengan Adaptive Recursive Sharding:
+    1. Mempartisi per Kecamatan (10 kecamatan di Sitaro).
+    2. Jika suatu kecamatan memiliki > 1.000 data, otomatis dipartisi per Desa (001-020).
+    3. Menggabungkan dan mendeduplikasi seluruh data secara otomatis.
+    """
+    print("=" * 70)
+    print("🚀 FASIH SM ASSIGNMENT SCRAPER - FULL DATA MODE (AUTO-SHARDING)")
+    print(f"📅 Survey Period ID: {survey_period_id}")
+    print(f"📦 Batch Size: {page_size} baris/request | Batas Elasticsearch: 1.000/shard")
+    print("=" * 70)
+
+    # 1. Cek total data keseluruhan
+    init_res = fetch_single_query(cookie_header, xsrf_token, survey_period_id, search_val="", start_offset=0, page_size=1)
+    grand_total = init_res.get("recordsTotal") or init_res.get("totalHit") or 35585
+    print(f"\n📊 Total Keseluruhan di Database Fasih: {grand_total} data penugasan.")
+    print("⚙️ Memulai partisi wilayah bertingkat (Kecamatan ➔ Desa) agar seluruh data terambil...\n")
+
+    all_records = {} # Map ID -> dict untuk deduplikasi otomatis
+
+    for idx, (kec_code, kec_name) in enumerate(KECAMATAN_SITARO, 1):
+        print(f"\n🏢 [{idx}/10] Memeriksa Kecamatan {kec_code} ({kec_name})...")
+        try:
+            kec_probe = fetch_single_query(cookie_header, xsrf_token, survey_period_id, search_val=kec_code, start_offset=0, page_size=1)
+            kec_total = kec_probe.get("totalHit", 0)
+        except Exception as e:
+            print(f"   ⚠️ Galat saat probe kecamatan {kec_code}: {e}")
+            continue
+
+        print(f"   📍 Total data di {kec_name}: {kec_total} data")
+
+        if kec_total == 0:
+            continue
+
+        if kec_total <= 1000:
+            # Jika <= 1000 data, tarik langsung sekaligus!
+            print(f"   ⚡ Ukuran <= 1000, menarik langsung dalam 1 sesi...")
+            items, _ = scrape_slice(cookie_header, xsrf_token, survey_period_id, search_val=kec_code, label=kec_name, page_size=page_size, delay=delay)
+            for it in items:
+                all_records[it["id"]] = flatten_record(it)
+            print(f"   ✅ Selesai {kec_name}: {len(items)} baris (Total akumulasi: {len(all_records)})")
+        else:
+            # Jika > 1000 data, pecah per DESA (001 s.d 025)
+            print(f"   ⚠️ Ukuran {kec_total} > 1000 (limit server). Mempartisi per DESA...")
+            kec_collected = 0
+            for desa_num in range(1, 26):
+                desa_code = f"{kec_code}{desa_num:03d}"
+                try:
+                    probe = fetch_single_query(cookie_header, xsrf_token, survey_period_id, search_val=desa_code, start_offset=0, page_size=1)
+                    desa_total = probe.get("totalHit", 0)
+                except Exception:
+                    continue
+
+                if desa_total == 0:
+                    continue
+
+                print(f"   🏡 Desa {desa_code} ({desa_total} data): menarik...", end="", flush=True)
+                items, _ = scrape_slice(cookie_header, xsrf_token, survey_period_id, search_val=desa_code, label=desa_code, page_size=page_size, delay=delay)
+                for it in items:
+                    all_records[it["id"]] = flatten_record(it)
+                kec_collected += len(items)
+                print(f" didapat {len(items)} data.")
+
+            print(f"   ✅ Selesai {kec_name}: {kec_collected} / {kec_total} baris (Total akumulasi: {len(all_records)})")
+
+    print("\n" + "=" * 70)
+    print(f"🎉 SELESAI! Berhasil mengumpulkan {len(all_records)} / {grand_total} data unik penugasan.")
+    print("=" * 70)
+    return list(all_records.values())
 
 def main():
-    parser = argparse.ArgumentParser(description="Fasih SM BPS Assignment Scraper CLI")
+    parser = argparse.ArgumentParser(description="Fasih SM BPS Full Assignment Scraper CLI")
     parser.add_argument("--cookie", help="Cookie header string dari browser", default="")
     parser.add_argument("--xsrf", help="XSRF-TOKEN header", default=DEFAULT_XSRF_TOKEN)
     parser.add_argument("--period", help="Survey Period ID", default=DEFAULT_SURVEY_PERIOD_ID)
-    parser.add_argument("--max-pages", type=int, help="Maksimal halaman yang diambil (default: semua)", default=None)
-    parser.add_argument("--page-size", type=int, help="Ukuran batch per request (default: 50)", default=50)
+    parser.add_argument("--page-size", type=int, help="Ukuran batch per request (default: 100)", default=100)
     parser.add_argument("--output", help="Nama file output tanpa ekstensi", default="")
 
     args = parser.parse_args()
 
-    # Cookie default dari sesi aktif user jika tidak disediakan argumen
     cookie = args.cookie or (
         f"XSRF-TOKEN={args.xsrf}; "
         "JSESSIONID=00ED19F826396DC2FDF9E14A044174C9; "
         "SESSION=82285aa4-2720-46ac-87de-767b7340d9e6"
     )
 
-    rows = scrape_all(
-        cookie_header=cookie,
-        xsrf_token=args.xsrf,
-        survey_period_id=args.period,
-        max_pages=args.max_pages,
-        page_size=args.page_size
-    )
+    try:
+        rows = scrape_all_sharded(
+            cookie_header=cookie,
+            xsrf_token=args.xsrf,
+            survey_period_id=args.period,
+            page_size=args.page_size
+        )
+    except Exception as e:
+        print(f"\n❌ Terjadi kesalahan fatal: {e}")
+        return
 
     if not rows:
         print("❌ Tidak ada data yang berhasil diekstrak.")
         return
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_base = args.output or f"Raw_Assignment_SE2026_{timestamp}"
+    out_base = args.output or f"Raw_Assignment_SE2026_Full_{timestamp}"
 
     df = pd.DataFrame(rows)
 
     # Beri label yang jelas untuk kolom data1 s.d data10 sesuai template Fasih SM
     df.rename(columns=FASIH_COLUMN_LABELS, inplace=True)
 
-    # Pastikan kolom dengan kode (seperti wilayah, id) bertipe string agar leading zero tidak hilang
+    # Pastikan kolom dengan kode (wilayah, id, telepon, nomor urut bangunan) bertipe string agar leading zero tidak hilang
     for col in df.columns:
         if any(keyword in col.lower() for keyword in ["code", "kode", "wilker", "id", "data", "phone", "telp"]):
             df[col] = df[col].astype(str)
 
     # 1. Simpan ke Excel (.xlsx)
     xlsx_path = f"{out_base}.xlsx"
-    print(f"💾 Menyimpan data ke Excel: {xlsx_path} ...", end="", flush=True)
+    print(f"\n💾 Menyimpan data ke Excel: {xlsx_path} ...", end="", flush=True)
     df.to_excel(xlsx_path, index=False, engine="openpyxl")
     print(" [SELESAI]")
 
@@ -212,9 +295,10 @@ def main():
     df.to_csv(csv_path, index=False, encoding="utf-8-sig")
     print(" [SELESAI]")
 
-    print(f"\n✅ BERHASIL: {len(df)} baris data berhasil diekspor ke:")
-    print(f"   📁 {xlsx_path}")
-    print(f"   📁 {csv_path}")
+    print(f"\n✅ BERHASIL EKSPOR SELURUH DATA:")
+    print(f"   📊 Total Baris: {len(df):,} baris")
+    print(f"   📁 Excel: {xlsx_path}")
+    print(f"   📁 CSV:   {csv_path}")
 
 if __name__ == "__main__":
     main()

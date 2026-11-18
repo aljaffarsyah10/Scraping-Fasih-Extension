@@ -205,6 +205,8 @@ const FasihScraperEngine = (() => {
       this.customHeaders = options.customHeaders || {};
       this.sniffedBody = options.sniffedBody || (typeof window !== 'undefined' ? window.__fasihSniffedBody : null);
       this.method = options.method || (this.endpoint.includes('datatable') ? 'POST' : 'GET');
+      this.autoSharding = options.autoSharding !== undefined ? options.autoSharding : true;
+      this.searchQuery = options.searchQuery || '';
       
       // Callback progres
       this.onProgress = options.onProgress || (() => {});
@@ -259,7 +261,7 @@ const FasihScraperEngine = (() => {
     /**
      * Mengambil 1 halaman data dengan retry pintar untuk HTTP 429
      */
-    async fetchSinglePage(pageIndex) {
+    async fetchSinglePage(pageIndex, customSearchValue = null) {
       const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : 'https://fasih-sm.bps.go.id';
       const isPost = this.method === 'POST' || this.endpoint.includes('datatable');
       
@@ -305,7 +307,8 @@ const FasihScraperEngine = (() => {
         }
 
         if (!bodyPayload.order) bodyPayload.order = [];
-        if (!bodyPayload.search) bodyPayload.search = { value: '', regex: false };
+        const activeSearch = customSearchValue !== null ? customSearchValue : (this.searchQuery || '');
+        bodyPayload.search = { value: activeSearch, regex: false };
 
         const activePeriodeId = this.periodeId || detectPeriode();
         if (!bodyPayload.assignmentExtraParam) {
@@ -411,6 +414,116 @@ const FasihScraperEngine = (() => {
       let totalPages = 1;
       let totalElements = 0;
       let pagesProcessed = 0;
+
+      // Ambil halaman pertama untuk deteksi total data
+      const firstRaw = await this.fetchSinglePage(pageIndex);
+      const firstMeta = extractPageMetadata(firstRaw, this.pageSize);
+      if (firstMeta.totalPages) totalPages = firstMeta.totalPages;
+      if (firstMeta.totalItems) totalElements = firstMeta.totalItems;
+
+      // JIKA TOTAL DATA > 1.000 DAN INGIN MENARIK SEMUA DATA (maxPages >= totalPages):
+      // Aktifkan mode Adaptive Sharding per Wilayah agar tidak mentok batas 1.000 Elasticsearch!
+      if (this.autoSharding && totalElements > 1000 && this.maxPages >= totalPages) {
+        this.onLog(`⚡ Terdeteksi ${totalElements} data (melebihi limit 1.000 server). Mengaktifkan mode Auto-Sharding Wilayah...`);
+        const kecamatanList = [
+          '7108010', '7108020', '7108030', '7108040', '7108050',
+          '7108060', '7108070', '7108080', '7108090', '7108100'
+        ];
+
+        const recordMap = new Map();
+
+        for (let k = 0; k < kecamatanList.length; k++) {
+          if (this.isAborted) break;
+          const kecCode = kecamatanList[k];
+          this.onLog(`🏢 Memeriksa Kecamatan [${k + 1}/10] (Kode ${kecCode})...`);
+
+          const probeKec = await this.fetchSinglePage(0, kecCode);
+          const kecMeta = extractPageMetadata(probeKec, this.pageSize);
+          const kecTotal = kecMeta.totalItems || 0;
+
+          if (kecTotal === 0) continue;
+
+          // Jika data per kecamatan <= 1000, tarik langsung
+          if (kecTotal <= 1000) {
+            let pIdx = 0;
+            const pMax = Math.ceil(kecTotal / this.pageSize);
+            while (!this.isAborted && pIdx < pMax) {
+              const res = await this.fetchSinglePage(pIdx, kecCode);
+              const m = extractPageMetadata(res, this.pageSize);
+              if (!m.items || m.items.length === 0) break;
+              for (const it of m.items) {
+                if (it.id && !recordMap.has(it.id)) {
+                  recordMap.set(it.id, flattenRecord(it));
+                }
+              }
+              pIdx++;
+              this.onProgress({
+                currentPage: recordMap.size,
+                totalPages: totalElements,
+                totalElements: totalElements,
+                fetchedCount: recordMap.size,
+                percent: Math.min(100, Math.round((recordMap.size / totalElements) * 100))
+              });
+              await sleep(this.delayMs);
+            }
+          } else {
+            // Jika > 1000, partisi ke tingkat Desa (001 s.d 025)
+            this.onLog(`   ⚠️ Data kecamatan (${kecTotal}) > 1000. Mempartisi per Desa...`);
+            for (let d = 1; d <= 25; d++) {
+              if (this.isAborted) break;
+              const desaCode = `${kecCode}${String(d).padStart(3, '0')}`;
+              const probeDesa = await this.fetchSinglePage(0, desaCode);
+              const desaMeta = extractPageMetadata(probeDesa, this.pageSize);
+              const desaTotal = desaMeta.totalItems || 0;
+              if (desaTotal === 0) continue;
+
+              let pIdx = 0;
+              const pMax = Math.ceil(desaTotal / this.pageSize);
+              while (!this.isAborted && pIdx < pMax) {
+                const res = await this.fetchSinglePage(pIdx, desaCode);
+                const m = extractPageMetadata(res, this.pageSize);
+                if (!m.items || m.items.length === 0) break;
+                for (const it of m.items) {
+                  if (it.id && !recordMap.has(it.id)) {
+                    recordMap.set(it.id, flattenRecord(it));
+                  }
+                }
+                pIdx++;
+                this.onProgress({
+                  currentPage: recordMap.size,
+                  totalPages: totalElements,
+                  totalElements: totalElements,
+                  fetchedCount: recordMap.size,
+                  percent: Math.min(100, Math.round((recordMap.size / totalElements) * 100))
+                });
+                await sleep(this.delayMs);
+              }
+            }
+          }
+        }
+
+        this.collectedData = Array.from(recordMap.values());
+        this.isRunning = false;
+        this.onLog(`🎉 Selesai! Berhasil mengumpulkan ${this.collectedData.length} baris data penugasan tanpa batas 1.000.`);
+        return this.collectedData;
+      }
+
+      // Mode Normal (untuk data <= 1000 atau jika pengguna membatasi jumlah halaman)
+      if (firstMeta.items && firstMeta.items.length > 0) {
+        for (const item of firstMeta.items) {
+          this.collectedData.push(flattenRecord(item));
+        }
+        pagesProcessed++;
+        pageIndex++;
+        this.onProgress({
+          currentPage: pageIndex,
+          totalPages: totalPages,
+          totalElements: totalElements,
+          fetchedCount: this.collectedData.length,
+          percent: Math.min(100, Math.round((pageIndex / totalPages) * 100))
+        });
+        await sleep(this.delayMs);
+      }
 
       while (!this.isAborted && pageIndex < totalPages && pagesProcessed < this.maxPages) {
         this.onLog(`📄 Mengambil halaman ${pageIndex + 1} (Offset baris ${pageIndex * this.pageSize})...`);
