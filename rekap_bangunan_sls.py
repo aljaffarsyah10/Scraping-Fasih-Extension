@@ -48,19 +48,22 @@ def proses_rekap(input_file, output_file=None):
     print(f"✓ Berhasil membaca {len(df):,} baris data.")
 
     # Cari nama kolom yang sesuai
-    col_data3 = next((c for c in df.columns if "data3" in c), None)
-    col_data1 = next((c for c in df.columns if "data1" in c), None)
-    col_sls_code = next((c for c in df.columns if "level5_fullCode" in c or "sls_code" in c.lower()), None)
-    col_sls_name = next((c for c in df.columns if "level5_name" in c or "sls_name" in c.lower()), None)
-    col_desa_name = next((c for c in df.columns if "level4_name" in c or "desa" in c.lower()), None)
-    col_kec_name = next((c for c in df.columns if "level3_name" in c or "kecamatan" in c.lower()), None)
+    col_data3 = next((c for c in df.columns if "nomor_bangunan_raw" in c or "nomor_bangunan_bersih" in c or "data3" in c), None)
+    col_data1 = next((c for c in df.columns if "nama_assignment" in c or "data1" in c), None)
+    col_sls_code = next((c for c in df.columns if c == "kode_sls" or "level5_fullCode" in c or "sls_code" in c.lower()), None)
+    col_sls_name = next((c for c in df.columns if c == "nama_sls" or "level5_name" in c or "sls_name" in c.lower()), None)
+    col_desa_name = next((c for c in df.columns if c == "nama_desa" or "level4_name" in c or "desa" in c.lower()), None)
+    col_kec_name = next((c for c in df.columns if c == "nama_kecamatan" or "level3_name" in c or "kecamatan" in c.lower()), None)
 
     if not col_data3:
-        print("❌ Kolom nomor bangunan (data3) tidak ditemukan dalam data.")
+        print("❌ Kolom nomor bangunan (data3 / nomor_bangunan_raw) tidak ditemukan dalam data.")
         return
 
     # Bersihkan nomor bangunan
-    df["no_bangunan_bersih"] = df[col_data3].apply(extract_clean_no_bangunan)
+    if "nomor_bangunan_bersih" in df.columns and col_data3 == "nomor_bangunan_bersih":
+        df["no_bangunan_bersih"] = df["nomor_bangunan_bersih"].fillna("").astype(str).str.strip()
+    else:
+        df["no_bangunan_bersih"] = df[col_data3].apply(extract_clean_no_bangunan)
 
     # Identifikasi SLS jika belum ada kolom wilayah khusus
     if not col_sls_code and "codeIdentity" in df.columns:
@@ -126,12 +129,19 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         target_file = sys.argv[1]
     else:
-        # Cari file CSV atau XLSX hasil scrape terbaru di folder kerja
-        csvs = glob.glob("Raw_Assignment_*.csv")
-        target_file = max(csvs, key=os.path.getmtime) if csvs else None
+        # Prioritaskan Master Data Assignment di folder output
+        master_csv = os.path.join("output", "Master_Data_Assignment_SE2026_Sitaro.csv")
+        if os.path.exists(master_csv):
+            target_file = master_csv
+        elif os.path.exists("Master_Data_Assignment_SE2026_Sitaro.csv"):
+            target_file = "Master_Data_Assignment_SE2026_Sitaro.csv"
+        else:
+            # Cari file CSV hasil scrape terbaru di folder output atau root
+            csvs = glob.glob(os.path.join("output", "*.csv")) + glob.glob("*.csv") + glob.glob(os.path.join("output", "raw_archive", "*.csv"))
+            target_file = max(csvs, key=os.path.getmtime) if csvs else None
 
-    if not target_file:
-        print("❌ Tidak ditemukan file hasil scraping (Raw_Assignment_*.csv).")
+    if not target_file or not os.path.exists(target_file):
+        print("❌ Tidak ditemukan file dataset penugasan CSV/XLSX.")
         sys.exit(1)
 
     proses_rekap(target_file)
