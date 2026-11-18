@@ -21,6 +21,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import requests
 import pandas as pd
+import urllib3
+
+# Nonaktifkan peringatan SSL tidak terverifikasi agar tampilan konsol bersih
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 DEFAULT_ENDPOINT = "https://fasih-sm.bps.go.id/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode"
 DEFAULT_SURVEY_PERIOD_ID = "fd68e454-ba45-4b85-8205-f3bf777ded24"
@@ -158,6 +162,14 @@ class ParallelFasihScraper:
                     wait_time *= 2
                     retries -= 1
                     continue
+
+                if resp.status_code == 401:
+                    raise PermissionError(
+                        "Sesi login Fasih SM Anda telah KEDALUWARSA (HTTP 401 Unauthorized).\n"
+                        "💡 Solusi:\n"
+                        "1. (Paling Praktis) Buka web Fasih SM di Chrome (login jika logout), lalu gunakan Ekstensi Chrome 'Ekspor Raw Assignment' yang langsung memakai sesi browser Anda.\n"
+                        "2. Atau salin Cookie terbaru dari DevTools Network (F12) dan jalankan: python fasih_scraper.py --cookie \"COOKIE_BARU\" --xsrf \"XSRF_BARU\""
+                    )
 
                 if resp.status_code != 200:
                     raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:150]}")
