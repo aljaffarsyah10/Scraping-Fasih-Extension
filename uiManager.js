@@ -323,9 +323,9 @@ const FasihUI = (() => {
 
               <div class="form-group">
                 <label>Endpoint API</label>
-                <input type="text" id="inp-endpoint" value="" placeholder="Contoh: /app/api/assignment-general/... (otomatis terisi)" />
+                <input type="text" id="inp-endpoint" value="/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode" placeholder="Contoh: /app/api/... (otomatis terisi)" />
                 <small style="font-size: 11px; color: var(--text-muted); display: block; margin-top: 4px;">
-                  Otomatis terdeteksi saat tabel penugasan dimuat atau saat Anda klik ganti halaman di Fasih.
+                  Endpoint resmi analitik penugasan Fasih SM.
                 </small>
               </div>
 

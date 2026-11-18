@@ -24,8 +24,8 @@ const FasihScraperEngine = (() => {
   function detectPeriode() {
     if (typeof window === 'undefined') return null;
 
-    // 1. Cek pola URL /app/surveys/{surveyId}/{periodeId} (struktur rute Fasih SM)
-    const surveyMatch = window.location.pathname.match(/\/app\/surveys\/[0-9a-fA-F-]+\/([0-9a-fA-F-]+)/);
+    // 1. Cek pola URL /app/surveys/{surveyId}/... (parameter periodeId di API analitik Fasih memakai UUID ini)
+    const surveyMatch = window.location.pathname.match(/\/app\/surveys\/([0-9a-fA-F-]+)/);
     if (surveyMatch) return surveyMatch[1];
 
     // 2. Cek link breadcrumb di DOM yang mengarah ke /app/surveys/{surveyId}/{periodeId}
@@ -160,7 +160,7 @@ const FasihScraperEngine = (() => {
    */
   class ScraperTask {
     constructor(options = {}) {
-      this.endpoint = options.endpoint || '';
+      this.endpoint = options.endpoint || '/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode';
       this.periodeId = options.periodeId || detectPeriode();
       this.pageSize = options.pageSize || 50;
       this.startPage = options.startPage !== undefined ? options.startPage : 0; // 0-based index default
