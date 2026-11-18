@@ -24,7 +24,20 @@ const FasihScraperEngine = (() => {
   function detectPeriode() {
     if (typeof window === 'undefined') return null;
 
-    // 1. Cek query parameter di URL
+    // 1. Cek pola URL /app/surveys/{surveyId}/{periodeId} (struktur rute Fasih SM)
+    const surveyMatch = window.location.pathname.match(/\/app\/surveys\/[0-9a-fA-F-]+\/([0-9a-fA-F-]+)/);
+    if (surveyMatch) return surveyMatch[1];
+
+    // 2. Cek link breadcrumb di DOM yang mengarah ke /app/surveys/{surveyId}/{periodeId}
+    try {
+      const surveyLinks = document.querySelectorAll('a[href*="/app/surveys/"]');
+      for (const a of surveyLinks) {
+        const m = (a.getAttribute('href') || '').match(/\/app\/surveys\/[0-9a-fA-F-]+\/([0-9a-fA-F-]+)/);
+        if (m) return m[1];
+      }
+    } catch (e) {}
+
+    // 3. Cek query parameter di URL
     try {
       const sp = new URLSearchParams(window.location.search);
       for (const key of ['periodeId', 'periodId', 'periode', 'period', 'id_periode', 'idPeriode']) {
@@ -33,7 +46,7 @@ const FasihScraperEngine = (() => {
       }
     } catch (e) {}
 
-    // 2. Cek pathname URL
+    // 4. Cek pathname URL lainnya (/app/assignment/{uuid})
     const pathMatch = window.location.pathname.match(UUID_REGEX);
     if (pathMatch) return pathMatch[0];
 
