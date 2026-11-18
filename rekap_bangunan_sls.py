@@ -13,6 +13,16 @@ import sys
 import glob
 import pandas as pd
 
+def sort_key_bangunan(val):
+    s = str(val).strip()
+    if s.isdigit():
+        return (0, int(s), "")
+    import re
+    m = re.match(r"^(\d+)(.*)$", s)
+    if m:
+        return (0, int(m.group(1)), m.group(2))
+    return (1, 0, s)
+
 def extract_clean_no_bangunan(val):
     if pd.isna(val):
         return ""
@@ -71,7 +81,7 @@ def proses_rekap(input_file, output_file=None):
         total_assignment=("id", "count") if "id" in df.columns else ("no_bangunan_bersih", "count"),
         total_bangunan_fisik=("no_bangunan_bersih", "nunique"),
         daftar_sampel_bangunan=("no_bangunan_bersih", lambda s: ", ".join(
-            sorted(set(s), key=lambda x: int(x) if x.isdigit() else x)[:15]
+            sorted(set(str(x) for x in s if str(x).strip()), key=sort_key_bangunan)[:15]
         ))
     ).reset_index()
 
