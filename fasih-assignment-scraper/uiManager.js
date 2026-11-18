@@ -335,22 +335,31 @@ const FasihUI = (() => {
                   <input type="number" id="inp-max-pages" placeholder="Semua (kosongkan)" min="1" />
                 </div>
                 <div class="form-group">
-                  <label>Ukuran Halaman (Size)</label>
+                  <label>Ukuran Batch (Per Request)</label>
                   <select id="inp-page-size">
-                    <option value="10" selected>10 per hal (paling aman)</option>
-                    <option value="25">25 per hal</option>
+                    <option value="100" selected>100 per hal (Paling Cepat & Optimal)</option>
                     <option value="50">50 per hal</option>
-                    <option value="100">100 per hal</option>
+                    <option value="25">25 per hal</option>
+                    <option value="10">10 per hal (Sangat Santai)</option>
                   </select>
                 </div>
               </div>
 
-              <div class="form-group">
-                <label>Format Unduhan</label>
-                <select id="inp-format">
-                  <option value="xlsx" selected>Excel Spreadsheet (.xlsx)</option>
-                  <option value="csv">Comma Separated Values (.csv)</option>
-                </select>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Pilihan Kolom Data</label>
+                  <select id="inp-columns-mode">
+                    <option value="minimal" selected>Ringkas: No Bangunan & SLS Saja (Super Cepat)</option>
+                    <option value="full">Lengkap: Seluruh 83 Kolom Mentah</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Format Unduhan</label>
+                  <select id="inp-format">
+                    <option value="xlsx" selected>Excel Spreadsheet (.xlsx)</option>
+                    <option value="csv">Comma Separated Values (.csv)</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -398,6 +407,7 @@ const FasihUI = (() => {
     const inpEndpoint = $('inp-endpoint');
     const inpMaxPages = $('inp-max-pages');
     const inpPageSize = $('inp-page-size');
+    const inpColumnsMode = $('inp-columns-mode');
     const inpFormat = $('inp-format');
 
     const configSection = $('config-section');
@@ -494,10 +504,33 @@ const FasihUI = (() => {
         // Trigger Callback untuk Fase 4 (Exporter)
         if (window.FasihExporter) {
           const fmt = inpFormat.value;
-          statusText.textContent = `Menyiapkan unduhan ${fmt.toUpperCase()}...`;
-          await FasihExporter.exportData(results, fmt, `Raw_Assignment_${periodeId || 'Fasih'}_${Date.now()}`);
+          const isMinimal = inpColumnsMode && inpColumnsMode.value === 'minimal';
+          let exportPayload = results;
+
+          if (isMinimal) {
+            exportPayload = results.map(row => {
+              const data3Raw = String(row['data3'] || row['data3_No_Urut_Bangunan_IDSBR'] || '');
+              const noBgn = data3Raw.split('/')[0].trim();
+              return {
+                id: row['id'] || '',
+                codeIdentity: row['codeIdentity'] || '',
+                kode_sls: row['region_level1_level2_level3_level4_level5_fullCode'] || (String(row['codeIdentity'] || '').slice(0, 14)),
+                nama_sls: row['region_level1_level2_level3_level4_level5_name'] || '',
+                nama_desa: row['region_level1_level2_level3_level4_name'] || '',
+                nama_kecamatan: row['region_level1_level2_level3_name'] || '',
+                nama_keluarga_bangunan_usaha: row['data1'] || row['data1_Nama_Keluarga_Bangunan_Usaha'] || '',
+                alamat_prelist: row['data2'] || row['data2_Alamat_Prelist'] || '',
+                nomor_bangunan_raw: data3Raw,
+                nomor_bangunan_bersih: noBgn,
+                status_penugasan: row['assignmentStatusAlias'] || ''
+              };
+            });
+          }
+
+          statusText.textContent = `Menyiapkan unduhan ${fmt.toUpperCase()} (${isMinimal ? 'Ringkas' : 'Lengkap'})...`;
+          const prefix = isMinimal ? 'Ringkas_Bangunan_SLS' : 'Raw_Assignment';
+          await FasihExporter.exportData(exportPayload, fmt, `${prefix}_${periodeId || 'Fasih'}_${Date.now()}`);
         } else {
-          // Fallback sederhana jika Fase 4 belum digabung
           console.log('Data terambil:', results);
           alert(`Scraping selesai! Terkumpul ${results.length} data baris.`);
         }
