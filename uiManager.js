@@ -323,7 +323,10 @@ const FasihUI = (() => {
 
               <div class="form-group">
                 <label>Endpoint API</label>
-                <input type="text" id="inp-endpoint" value="/app/api/assignment-general/api/assignment/list" placeholder="/app/api/..." />
+                <input type="text" id="inp-endpoint" value="" placeholder="Contoh: /app/api/assignment-general/... (otomatis terisi)" />
+                <small style="font-size: 11px; color: var(--text-muted); display: block; margin-top: 4px;">
+                  Otomatis terdeteksi saat tabel penugasan dimuat atau saat Anda klik ganti halaman di Fasih.
+                </small>
               </div>
 
               <div class="form-row">
@@ -412,6 +415,15 @@ const FasihUI = (() => {
           inpPeriode.value = detected;
         }
       }
+
+      // Auto detect endpoint dari sniffer pasif
+      if (window.__fasihSniffedEndpoint && !inpEndpoint.value) {
+        inpEndpoint.value = window.__fasihSniffedEndpoint;
+      }
+      if (window.__fasihSniffedPeriode && !inpPeriode.value) {
+        inpPeriode.value = window.__fasihSniffedPeriode;
+      }
+
       backdrop.classList.add('open');
     };
 

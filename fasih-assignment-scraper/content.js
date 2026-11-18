@@ -9,6 +9,21 @@
 
   console.log('%c🚀 [Fasih Assignment Raw Exporter] Ekstensi Aktif', 'background: #2563eb; color: white; font-weight: bold; padding: 4px 8px; border-radius: 4px;');
 
+  window.__fasihSniffedEndpoint = null;
+  window.__fasihSniffedPeriode = null;
+
+  // Tangkap event hasil sniffing dari injected-hook.js
+  window.addEventListener('__fasih_api_sniffed', (e) => {
+    const detail = e.detail;
+    if (detail && detail.pathname) {
+      window.__fasihSniffedEndpoint = detail.pathname;
+      if (detail.periodeId) {
+        window.__fasihSniffedPeriode = detail.periodeId;
+      }
+      console.log('%c🎯 [Fasih Scraper] Endpoint Terdeteksi Otomatis:', 'color: #10b981; font-weight: bold;', detail.pathname);
+    }
+  });
+
   function setupUIOnPage() {
     // Tampilkan UI jika user berada di dalam aplikasi Fasih SM
     if (window.location.pathname.startsWith('/app/')) {
