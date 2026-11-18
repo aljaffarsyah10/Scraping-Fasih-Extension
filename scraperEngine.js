@@ -167,6 +167,7 @@ const FasihScraperEngine = (() => {
       this.maxPages = options.maxPages || Infinity;
       this.delayMs = options.delayMs || 250;
       this.extraParams = options.extraParams || {};
+      this.customHeaders = options.customHeaders || {};
       
       // Callback progres
       this.onProgress = options.onProgress || (() => {});
@@ -228,7 +229,8 @@ const FasihScraperEngine = (() => {
             method: 'GET',
             headers: {
               'Accept': 'application/json',
-              'X-Requested-With': 'XMLHttpRequest'
+              'X-Requested-With': 'XMLHttpRequest',
+              ...this.customHeaders
             },
             credentials: 'include'
           });

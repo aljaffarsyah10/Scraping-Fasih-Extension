@@ -12,6 +12,7 @@
   window.__fasihSniffedEndpoint = null;
   window.__fasihSniffedPeriode = null;
   window.__fasihSniffedParams = {};
+  window.__fasihSniffedHeaders = {};
 
   // Tangkap event hasil sniffing dari injected-hook.js
   window.addEventListener('__fasih_api_sniffed', (e) => {
@@ -24,7 +25,14 @@
       if (detail.params) {
         window.__fasihSniffedParams = detail.params;
       }
-      console.log('%c🎯 [Fasih Scraper] Endpoint Terdeteksi Otomatis:', 'color: #10b981; font-weight: bold;', detail.pathname, detail.params);
+      if (detail.headers) {
+        window.__fasihSniffedHeaders = detail.headers;
+      }
+      console.log('%c🎯 [Fasih Scraper] Request Terdeteksi:', 'color: #10b981; font-weight: bold;', {
+        endpoint: detail.pathname,
+        params: detail.params,
+        headers: detail.headers
+      });
     }
   });
 
@@ -45,7 +53,6 @@
   }
 
   // Dukungan Navigasi SPA (Single Page Application):
-  // Menangkap perubahan URL saat berpindah menu tanpa reload halaman utuh
   let lastUrl = window.location.href;
   const urlObserver = new MutationObserver(() => {
     if (window.location.href !== lastUrl) {
@@ -55,7 +62,5 @@
   });
 
   urlObserver.observe(document.body, { childList: true, subtree: true });
-
-  // Tangkap event popstate (tombol Back/Forward browser)
   window.addEventListener('popstate', setupUIOnPage);
 })();

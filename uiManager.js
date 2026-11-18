@@ -451,10 +451,11 @@ const FasihUI = (() => {
       const maxPages = inpMaxPages.value ? parseInt(inpMaxPages.value, 10) : Infinity;
       const pageSize = parseInt(inpPageSize.value, 10) || 10;
 
-      // Ambil parameter filter/wilayah hasil sniffing dari Fasih jika ada
+      // Ambil parameter filter/wilayah & headers hasil sniffing dari Fasih jika ada
       const extraParams = window.__fasihSniffedParams ? { ...window.__fasihSniffedParams } : {};
       delete extraParams.page;
       delete extraParams.size;
+      const customHeaders = window.__fasihSniffedHeaders ? { ...window.__fasihSniffedHeaders } : {};
 
       activeTask = new FasihScraperEngine.ScraperTask({
         endpoint,
@@ -462,6 +463,7 @@ const FasihUI = (() => {
         maxPages,
         pageSize,
         extraParams,
+        customHeaders,
         delayMs: 250,
         onProgress: (info) => {
           statPages.textContent = `Halaman ${info.currentPage} / ${info.totalPages || '?'}`;
