@@ -242,7 +242,14 @@ const FasihScraperEngine = (() => {
           }
 
           if (!res.ok) {
-            throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
+            let errDetail = '';
+            try {
+              const errJson = await res.json();
+              errDetail = errJson.message || errJson.error || JSON.stringify(errJson);
+            } catch (e) {
+              try { errDetail = await res.text(); } catch (e2) {}
+            }
+            throw new Error(`HTTP Error ${res.status}: ${res.statusText}${errDetail ? ' (' + errDetail.slice(0, 150) + ')' : ''}`);
           }
 
           const json = await res.json();
