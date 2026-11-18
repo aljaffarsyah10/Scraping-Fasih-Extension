@@ -141,8 +141,9 @@ const FasihScraperEngine = (() => {
       return { items, totalItems, totalPages, currentPage };
     }
 
-    // 1. Array data baris
+    // 1. Array data baris (Mendukung searchData Fasih SM)
     const candidates = [
+      jsonResponse.searchData && Array.isArray(jsonResponse.searchData) ? jsonResponse.searchData : null,
       jsonResponse.data && Array.isArray(jsonResponse.data) ? jsonResponse.data : null,
       jsonResponse.data && jsonResponse.data.content,
       jsonResponse.data && jsonResponse.data.assignments,
@@ -160,9 +161,9 @@ const FasihScraperEngine = (() => {
       }
     }
 
-    // 2. Info total records & halaman
+    // 2. Info total records & halaman (Mendukung totalHit Fasih SM)
     const root = (jsonResponse.data && !Array.isArray(jsonResponse.data)) ? jsonResponse.data : jsonResponse;
-    totalItems = jsonResponse.recordsTotal ?? jsonResponse.recordsFiltered ?? root.totalElements ?? root.totalItems ?? root.total ?? items.length;
+    totalItems = jsonResponse.totalHit ?? jsonResponse.recordsTotal ?? jsonResponse.recordsFiltered ?? root.totalElements ?? root.totalItems ?? root.total ?? items.length;
     
     const size = pageSize || root.size || (items.length > 0 ? items.length : 50);
     totalPages = root.totalPages ?? root.pageCount ?? (totalItems && size ? Math.ceil(totalItems / size) : 1);

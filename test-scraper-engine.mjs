@@ -103,7 +103,22 @@ assert(dtMeta10.totalPages === 3559, 'DataTables: totalPages dihitung dengan ben
 const dtMeta50 = FasihScraperEngine.extractPageMetadata(sampleDataTablesResponse, 50);
 assert(dtMeta50.totalPages === 712, 'DataTables: totalPages dihitung dengan benar untuk pageSize 50 (35585/50 = 712)');
 
-// 4. Uji Default Kolom DataTables
+// 4. Uji Ekstraksi Skema Riil Fasih SM (searchData & totalHit)
+const sampleFasihRealResponse = {
+  searchData: [
+    { id: 'd8fa7cf7-66f7-4fe9-bca5-182254369408', data1: 'ISWAR KINGKAME' },
+    { id: 'e5f6g7h8-1234-5678-9abc-def012345678', data1: 'WARUNG BERKAH' }
+  ],
+  totalHit: 10000,
+  searchAggregation: []
+};
+
+const fasihMeta = FasihScraperEngine.extractPageMetadata(sampleFasihRealResponse, 10);
+assert(fasihMeta.items.length === 2, 'Fasih SM: searchData berhasil diekstrak');
+assert(fasihMeta.totalItems === 10000, 'Fasih SM: totalHit berhasil terbaca sebagai totalItems');
+assert(fasihMeta.totalPages === 1000, 'Fasih SM: totalPages dihitung dengan benar (10000/10 = 1000)');
+
+// 5. Uji Default Kolom DataTables
 assert(Array.isArray(FasihScraperEngine.DEFAULT_DATATABLE_COLUMNS), 'DEFAULT_DATATABLE_COLUMNS terdefinisi');
 assert(FasihScraperEngine.DEFAULT_DATATABLE_COLUMNS.length >= 10, 'DEFAULT_DATATABLE_COLUMNS memuat kolom penugasan');
 
