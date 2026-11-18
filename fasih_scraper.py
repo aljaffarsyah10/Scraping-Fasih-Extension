@@ -16,6 +16,20 @@ DEFAULT_ENDPOINT = "https://fasih-sm.bps.go.id/app/api/analytic/api/v2/assignmen
 DEFAULT_SURVEY_PERIOD_ID = "fd68e454-ba45-4b85-8205-f3bf777ded24"
 DEFAULT_XSRF_TOKEN = "55edd9d0-2888-4d52-8572-a96445cd513d"
 
+# Kamus label kolom resmi Fasih SM SE2026 (dari template custom-data)
+FASIH_COLUMN_LABELS = {
+    "data1": "data1_Nama_Keluarga_Bangunan_Usaha",
+    "data2": "data2_Alamat_Prelist",
+    "data3": "data3_No_Urut_Bangunan_IDSBR",
+    "data4": "data4_NIB_No_KK",
+    "data5": "data5_Email",
+    "data6": "data6_Skala_Usaha_Jenis_Prelist",
+    "data7": "data7_Jumlah_Usaha",
+    "data8": "data8_Kode_Pos",
+    "data9": "data9_Perubahan_SLS",
+    "data10": "data10_IDSBR_UMKM_SLS_Sama"
+}
+
 def flatten_record(obj, prefix="", res=None):
     if res is None:
         res = {}
@@ -177,6 +191,9 @@ def main():
     out_base = args.output or f"Raw_Assignment_SE2026_{timestamp}"
 
     df = pd.DataFrame(rows)
+
+    # Beri label yang jelas untuk kolom data1 s.d data10 sesuai template Fasih SM
+    df.rename(columns=FASIH_COLUMN_LABELS, inplace=True)
 
     # Pastikan kolom dengan kode (seperti wilayah, id) bertipe string agar leading zero tidak hilang
     for col in df.columns:
