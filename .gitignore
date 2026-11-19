@@ -6,6 +6,13 @@ desktop.ini
 # Logs & Temporary files
 *.log
 *.tmp
+*.png
+
+# Credentials & Browser Sessions
+config_account.json
+.env
+.chrome_profile/
+fresh_cookie.txt
 
 # Test output & captures
 fasih_phase1_capture_*.json

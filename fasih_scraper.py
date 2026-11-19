@@ -22,6 +22,7 @@ from datetime import datetime
 import requests
 import pandas as pd
 import urllib3
+from auth_manager import get_valid_cookie, extract_xsrf_token
 
 # Nonaktifkan peringatan SSL tidak terverifikasi agar tampilan konsol bersih
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -311,8 +312,12 @@ class ParallelFasihScraper:
 
 def main():
     parser = argparse.ArgumentParser(description="Fasih SM BPS High-Performance Parallel Scraper")
-    parser.add_argument("--cookie", help="Cookie header string dari browser", default="")
-    parser.add_argument("--xsrf", help="XSRF-TOKEN header", default=DEFAULT_XSRF_TOKEN)
+    parser.add_argument("-u", "--username", help="Username SSO BPS (Opsional, jika ingin login otomatis)", default="")
+    parser.add_argument("-p", "--password", help="Password SSO BPS (Opsional, jika ingin login otomatis)", default="")
+    parser.add_argument("--save-account", action="store_true", help="Simpan akun ke config_account.json lokal")
+    parser.add_argument("--force-login", action="store_true", help="Paksa login ulang meskipun ada cookie tersimpan")
+    parser.add_argument("--cookie", help="Cookie header string dari browser (Opsional, default otomatis auto-login)", default="")
+    parser.add_argument("--xsrf", help="XSRF-TOKEN header (Opsional, default diekstrak dari cookie)", default="")
     parser.add_argument("--period", help="Survey Period ID", default=DEFAULT_SURVEY_PERIOD_ID)
     parser.add_argument("--workers", type=int, help="Jumlah request paralel bersamaan (default: 4)", default=4)
     parser.add_argument("--page-size", type=int, help="Ukuran batch per request (default: 100)", default=100)
@@ -321,24 +326,29 @@ def main():
 
     args = parser.parse_args()
 
-    cookie = args.cookie
-    if not cookie and os.path.exists("fresh_cookie.txt"):
-        try:
-            with open("fresh_cookie.txt", "r", encoding="utf-8") as f:
-                cookie = f.read().strip()
-        except Exception:
-            pass
+    # Dapatkan cookie yang valid (cek validitas sesi atau jalankan auto-login jika kedaluwarsa)
+    if args.cookie:
+        cookie = args.cookie
+        xsrf_token = args.xsrf or extract_xsrf_token(cookie) or DEFAULT_XSRF_TOKEN
+    else:
+        cookie, xsrf_token = get_valid_cookie(
+            cli_user=args.username,
+            cli_pass=args.password,
+            survey_period_id=args.period,
+            force_login=args.force_login,
+            save_account=args.save_account
+        )
 
     if not cookie:
-        cookie = (
-            f"XSRF-TOKEN={args.xsrf}; "
-            "JSESSIONID=5E33591C963AFE1F49E0EA3BC3A47EA2; "
-            "SESSION=038c7e0c-dfb4-4a3c-8944-450a15288df7"
-        )
+        print("❌ Tidak dapat melanjutkan penarikan data tanpa cookie sesi yang valid.")
+        return
+
+    if not xsrf_token:
+        xsrf_token = extract_xsrf_token(cookie) or args.xsrf or DEFAULT_XSRF_TOKEN
 
     scraper = ParallelFasihScraper(
         cookie_header=cookie,
-        xsrf_token=args.xsrf,
+        xsrf_token=xsrf_token,
         survey_period_id=args.period,
         max_workers=args.workers,
         page_size=args.page_size,
@@ -357,7 +367,11 @@ def main():
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     mode_tag = "Minimal" if args.minimal else "Full"
-    out_base = args.output or f"Raw_Assignment_SE2026_{mode_tag}_{timestamp}"
+    
+    # Pastikan folder output/raw_archive ada
+    os.makedirs(os.path.join("output", "raw_archive"), exist_ok=True)
+    out_name = args.output or f"Raw_Assignment_SE2026_{mode_tag}_{timestamp}"
+    out_base = os.path.join("output", "raw_archive", out_name)
 
     df = pd.DataFrame(rows)
 
@@ -384,8 +398,8 @@ def main():
     print(f"   📁 File Excel   : {xlsx_path}")
     print(f"   📁 File CSV     : {csv_path}")
 
-    # Jika user menjalankan mode minimal, langsung tawarkan rekapitulasi SLS otomatis
-    print("\n💡 Tips: Untuk langsung melihat rekapitulasi bangunan fisik per SLS, jalankan:")
+    # Rekapitulasi SLS otomatis
+    print("\n💡 Tips: Untuk melihat rekapitulasi bangunan fisik riil per SLS, jalankan:")
     print(f"   python rekap_bangunan_sls.py {csv_path}")
 
 if __name__ == "__main__":

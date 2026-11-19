@@ -1,15 +1,25 @@
+import os
+import sys
 import json
 import time
 import requests
 import urllib3
 import pandas as pd
 import re
+from pathlib import Path
 
 urllib3.disable_warnings()
 
-# 1. Baca cookie & headers
-with open('fresh_cookie.txt') as f:
-    cookie = f.read().strip()
+# Tambahkan root directory ke sys.path untuk impor auth_manager
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+from auth_manager import get_valid_cookie, extract_xsrf_token
+
+# 1. Dapatkan cookie yang valid (otomatis login jika kedaluwarsa)
+cookie, xsrf_token = get_valid_cookie()
+if not cookie:
+    print("❌ Gagal mendapatkan sesi aktif. Eksekusi dibatalkan.")
+    sys.exit(1)
 
 url = 'https://fasih-sm.bps.go.id/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode'
 headers = {
@@ -18,8 +28,8 @@ headers = {
     'Content-Type': 'application/json',
     'Origin': 'https://fasih-sm.bps.go.id',
     'Referer': 'https://fasih-sm.bps.go.id/app/surveys/a0429e96-51a5-477b-a415-485f9c153004/fd68e454-ba45-4b85-8205-f3bf777ded24/data',
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Mobile Safari/537.36',
-    'X-XSRF-TOKEN': '55edd9d0-2888-4d52-8572-a96445cd513d',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+    'X-XSRF-TOKEN': xsrf_token or extract_xsrf_token(cookie),
     'Cookie': cookie
 }
 
@@ -130,8 +140,12 @@ def main():
     print("=" * 80)
 
     # 1. Baca data master saat ini
-    df_existing = pd.read_csv('Master_Data_Assignment_SE2026_Sitaro.csv', low_memory=False, dtype=str)
-    existing_ids = set(df_existing['id'])
+    csv_master_path = ROOT_DIR / "output" / "Master_Data_Assignment_SE2026_Sitaro.csv"
+    if csv_master_path.exists():
+        df_existing = pd.read_csv(csv_master_path, low_memory=False, dtype=str)
+    else:
+        df_existing = pd.DataFrame()
+    existing_ids = set(df_existing['id']) if not df_existing.empty else set()
     print(f"📂 Master saat ini: {len(existing_ids):,} data unik.")
 
     # 2. Dapatkan seluruh kode desa yang terdeteksi di Sitaro
@@ -223,8 +237,8 @@ def main():
     print(f"🎯 TOTAL MASTER DATASET SETELAH REKONSILIASI: {len(df_final):,} BARIS UNIK")
 
     # 4. Simpan ke CSV Master
-    df_final.to_csv('Master_Data_Assignment_SE2026_Sitaro.csv', index=False)
-    print("✓ Berhasil menyimpan: Master_Data_Assignment_SE2026_Sitaro.csv")
+    df_final.to_csv(csv_master_path, index=False)
+    print(f"✓ Berhasil menyimpan: {csv_master_path}")
 
     # 5. REKAPITULASI JUMLAH BANGUNAN FISIK PER SLS
     print("\n" + "=" * 80)
@@ -261,11 +275,15 @@ def main():
     print(f"   • TOTAL BANGUNAN FISIK RIIL (COUNT) : {total_bangunan_sum:,} BANGUNAN")
 
     # Simpan ke Excel Master
-    excel_path = "Master_Rekap_Bangunan_SE2026_Sitaro.xlsx"
+    excel_path = ROOT_DIR / "output" / "Master_Rekap_Bangunan_SE2026_Sitaro.xlsx"
     print(f"\n💾 Menyimpan workbook Excel berformat rapi ke '{excel_path}'...")
-    with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-        rekap_sls.to_excel(writer, sheet_name="Rekap_Bangunan_per_SLS", index=False)
-        df_final.to_excel(writer, sheet_name="Semua_Assignment", index=False)
+    try:
+        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+            rekap_sls.to_excel(writer, sheet_name="Rekap_Bangunan_per_SLS", index=False)
+            df_final.to_excel(writer, sheet_name="Semua_Assignment", index=False)
+        print("✓ Sukses menyimpan workbook master Excel.")
+    except Exception as e:
+        print(f"⚠️ Gagal menyimpan workbook Excel: {e}")
 
     print("🎉 SELURUH PROSES SELESAI DENGAN SUKSES!")
 

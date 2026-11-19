@@ -113,13 +113,35 @@ Untuk membandingkan jumlah data di server BPS dengan file lokal kita per kecamat
 python scripts/compare_server_master.py
 ```
 
-### D. Menjalankan Ulang Penarikan Data (Scraping)
-Jika sesi cookie berubah atau ingin memperbarui data:
-1. Salin cookie sesi terbaru dari browser (DevTools Network tab saat mengakses Fasih SM) dan simpan ke file `fresh_cookie.txt`.
-2. Jalankan harvester lengkap:
-   ```bash
-   python scripts/harvest_100_percent_sitaro.py
-   ```
+### D. Autentikasi Otomatis & Penarikan Data (Tanpa Salin Cookie Manual)
+Kini Anda **tidak perlu lagi menyalin cookie manual dari DevTools browser**. Sistem telah dilengkapi modul `auth_manager.py` berbasis Playwright yang otomatis mengisikan akun SSO BPS:
+
+#### 1. Menjalankan Scraper dengan Prompt Interaktif:
+Cukup jalankan perintah berikut, lalu masukkan username dan password ketika diminta (password tersembunyi demi keamanan):
+```bash
+python fasih_scraper.py --minimal
+```
+*Jika cookie di `fresh_cookie.txt` masih aktif, scraper langsung berjalan instan tanpa membuka browser. Jika kedaluwarsa, browser Chrome otomatis terbuka untuk mengautentikasi dan menyimpan cookie baru.*
+
+#### 2. Menjalankan Scraper dengan Argumen Akun Langsung:
+```bash
+python fasih_scraper.py -u "username_sso" -p "password_sso" --minimal
+```
+
+#### 3. Menyimpan Kredensial Lokal (Opsional):
+Jika tidak ingin mengetik akun berulang kali, simpan akun ke file lokal `config_account.json` (file ini otomatis diabaikan oleh `.gitignore` sehingga aman):
+```bash
+python auth_manager.py -u "username_sso" -p "password_sso" --save
+```
+Setelah tersimpan, Anda cukup menjalankan:
+```bash
+python fasih_scraper.py --minimal
+```
+atau
+```bash
+python scripts/harvest_100_percent_sitaro.py
+```
+*Catatan: Jika akun BPS Anda mengaktifkan Verifikasi 2 Langkah (2FA / OTP), peramban Chrome akan terbuka dan menampilkan kolom OTP agar Anda dapat memasukkan 6 digit kode dari aplikasi Authenticator.*
 
 ---
 
