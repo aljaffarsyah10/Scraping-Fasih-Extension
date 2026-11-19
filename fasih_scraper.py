@@ -314,7 +314,9 @@ def main():
     parser = argparse.ArgumentParser(description="Fasih SM BPS High-Performance Parallel Scraper")
     parser.add_argument("-u", "--username", help="Username SSO BPS (Opsional, jika ingin login otomatis)", default="")
     parser.add_argument("-p", "--password", help="Password SSO BPS (Opsional, jika ingin login otomatis)", default="")
-    parser.add_argument("--save-account", action="store_true", help="Simpan akun ke config_account.json lokal")
+    parser.add_argument("--otp", help="6 Digit Kode OTP langsung (Opsional)", default="")
+    parser.add_argument("--otp-secret", help="Secret Key Base32 Authenticator untuk auto-generate OTP (Opsional)", default="")
+    parser.add_argument("--save-account", action="store_true", help="Simpan akun & otp-secret ke config_account.json lokal")
     parser.add_argument("--force-login", action="store_true", help="Paksa login ulang meskipun ada cookie tersimpan")
     parser.add_argument("--cookie", help="Cookie header string dari browser (Opsional, default otomatis auto-login)", default="")
     parser.add_argument("--xsrf", help="XSRF-TOKEN header (Opsional, default diekstrak dari cookie)", default="")
@@ -334,6 +336,8 @@ def main():
         cookie, xsrf_token = get_valid_cookie(
             cli_user=args.username,
             cli_pass=args.password,
+            cli_otp_secret=args.otp_secret,
+            cli_otp=args.otp,
             survey_period_id=args.period,
             force_login=args.force_login,
             save_account=args.save_account

@@ -1,9 +1,12 @@
 """
-Modul Autentikasi Otomatis Fasih SM BPS
+Modul Autentikasi Otomatis Fasih SM BPS (Dengan Dukungan Akun, Sandi, dan OTP / 2FA)
 Menggunakan Playwright Persistent Context untuk:
 1. Memeriksa validitas cookie sesi yang ada secara cepat.
-2. Jika kedaluwarsa/belum ada, otomatis membuka browser dan mengisikan akun & kata sandi ke SSO BPS.
-3. Mendukung input OTP interaktif (jika akun mengaktifkan 2FA).
+2. Jika kedaluwarsa/belum ada, otomatis membuka peramban dan mengisikan akun & kata sandi ke SSO BPS.
+3. Mendukung verifikasi 2FA / OTP:
+   - Auto-Generate 100% jika memiliki OTP Secret Key (Base32 via pyotp).
+   - Input langsung 6 digit kode OTP via CLI / terminal.
+   - Pengisian langsung interaktif di jendela peramban.
 4. Menyimpan cookie sesi yang baru ke fresh_cookie.txt secara otomatis.
 """
 
@@ -78,31 +81,34 @@ def get_saved_credentials():
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("username", ""), data.get("password", "")
+                return (
+                    data.get("username", ""),
+                    data.get("password", ""),
+                    data.get("otp_secret", "")
+                )
         except Exception:
             pass
-    return "", ""
+    return "", "", ""
 
-def save_credentials(username, password):
+def save_credentials(username, password, otp_secret=""):
     """Menyimpan akun ke config_account.json lokal (diabaikan oleh git)"""
     try:
+        payload = {"username": username, "password": password}
+        if otp_secret:
+            payload["otp_secret"] = otp_secret
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump({"username": username, "password": password}, f, indent=2)
-        print("💾 Akun berhasil disimpan ke 'config_account.json' untuk login berikutnya.")
+            json.dump(payload, f, indent=2)
+        print("💾 Kredensial akun berhasil disimpan ke 'config_account.json' untuk login berikutnya.")
     except Exception as e:
         print(f"⚠️ Gagal menyimpan akun: {e}")
 
-def prompt_credentials(cli_user=None, cli_pass=None):
+def prompt_credentials(cli_user=None, cli_pass=None, cli_otp_secret=None):
     """Meminta input akun dan kata sandi jika belum disediakan"""
-    user = cli_user or os.environ.get("FASIH_USER", "")
-    pwd = cli_pass or os.environ.get("FASIH_PASS", "")
+    saved_u, saved_p, saved_otp_secret = get_saved_credentials()
 
-    if not user or not pwd:
-        saved_u, saved_p = get_saved_credentials()
-        if not user:
-            user = saved_u
-        if not pwd:
-            pwd = saved_p
+    user = cli_user or os.environ.get("FASIH_USER", "") or saved_u
+    pwd = cli_pass or os.environ.get("FASIH_PASS", "") or saved_p
+    otp_sec = cli_otp_secret or os.environ.get("FASIH_OTP_SECRET", "") or saved_otp_secret
 
     if not user:
         print("\n" + "=" * 60)
@@ -113,11 +119,22 @@ def prompt_credentials(cli_user=None, cli_pass=None):
     if not pwd:
         pwd = getpass.getpass("👉 Masukkan Kata Sandi (Password): ").strip()
 
-    return user, pwd
+    return user, pwd, otp_sec
 
-def run_browser_login(username, password, headless=False):
+def generate_totp_code(secret_key):
+    """Generate 6-digit TOTP code dari Base32 Secret Key menggunakan pyotp"""
+    try:
+        import pyotp
+        clean_secret = secret_key.replace(" ", "").strip().upper()
+        totp = pyotp.TOTP(clean_secret)
+        return totp.now()
+    except Exception as e:
+        print(f"⚠️ Gagal menghasilkan kode TOTP otomatis: {e}")
+        return ""
+
+def run_browser_login(username, password, otp_secret="", cli_otp="", headless=False):
     """
-    Meluncurkan browser otomatis, mengisi form SSO BPS, dan mengekstrak cookie sesi baru
+    Meluncurkan peramban otomatis, mengisi form SSO BPS, menangani OTP, dan mengekstrak cookie sesi baru
     """
     from playwright.sync_api import sync_playwright
 
@@ -131,7 +148,6 @@ def run_browser_login(username, password, headless=False):
             "--no-sandbox"
         ]
 
-        # Gunakan persistent context agar cache & security challenge tersimpan
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(PROFILE_DIR),
             channel="chrome",
@@ -153,6 +169,7 @@ def run_browser_login(username, password, headless=False):
         is_logged_in = False
         start_time = time.time()
         timeout_seconds = 120
+        otp_prompted = False
 
         while time.time() - start_time < timeout_seconds:
             time.sleep(1.5)
@@ -161,6 +178,7 @@ def run_browser_login(username, password, headless=False):
             # Kasus A: Halaman berada di SSO BPS (sso.bps.go.id)
             if "sso.bps.go.id" in curr_url:
                 try:
+                    # 1. Tahap Username & Password
                     user_input = page.locator('#username, input[name="username"]')
                     pass_input = page.locator('#password, input[name="password"]')
                     login_btn = page.locator('#kc-login, input[type="submit"], button[type="submit"]')
@@ -171,16 +189,57 @@ def run_browser_login(username, password, headless=False):
                         pass_input.fill(password)
                         time.sleep(0.5)
                         login_btn.click()
-                        print("🚀 Tombol Login ditekan. Menunggu pengalihan ke Fasih...")
+                        print("🚀 Tombol Login ditekan. Menunggu verifikasi...")
                         time.sleep(3)
                         continue
 
-                    # Cek jika ada verifikasi OTP / 2FA
-                    otp_input = page.locator('#otp, input[name="otp"], input[autocomplete="one-time-code"]')
+                    # 2. Tahap Verifikasi OTP / 2FA
+                    otp_input = page.locator('#otp, input[name="otp"], input[autocomplete="one-time-code"], input[name="totp"]')
                     if otp_input.is_visible(timeout=1000):
-                        print("\n⚠️ PERHATIAN: Halaman verifikasi OTP / 2FA terdeteksi!")
-                        print("👉 Silakan masukkan kode OTP Anda langsung di jendela Chrome yang terbuka...")
-                        # Tunggu sampai berpindah dari halaman OTP
+                        otp_submit_btn = page.locator('#kc-login, input[type="submit"], button[type="submit"]')
+
+                        # Cara 1: Auto-generate dari OTP Secret (jika ada)
+                        if otp_secret:
+                            auto_code = generate_totp_code(otp_secret)
+                            if auto_code:
+                                print(f"\n🔐 Menghasilkan kode OTP otomatis dari secret key: {auto_code}")
+                                otp_input.fill(auto_code)
+                                time.sleep(0.5)
+                                otp_submit_btn.click()
+                                print("🚀 Kode OTP otomatis telah dikirim. Menunggu pengalihan...")
+                                time.sleep(3)
+                                continue
+
+                        # Cara 2: Dari argumen CLI (--otp 123456)
+                        if cli_otp:
+                            print(f"\n🔑 Mengisikan kode OTP yang diberikan: {cli_otp}")
+                            otp_input.fill(cli_otp)
+                            time.sleep(0.5)
+                            otp_submit_btn.click()
+                            print("🚀 Kode OTP telah dikirim. Menunggu pengalihan...")
+                            cli_otp = "" # Cegah re-submit
+                            time.sleep(3)
+                            continue
+
+                        # Cara 3: Meminta input langsung di terminal
+                        if not otp_prompted:
+                            otp_prompted = True
+                            print("\n" + "=" * 60)
+                            print("⚠️ TERDETEKSI HALAMAN VERIFIKASI 2FA / OTP DI SSO BPS!")
+                            print("=" * 60)
+                            print("👉 Buka aplikasi Google Authenticator / FreeOTP di HP Anda.")
+                            user_otp = input("👉 Masukkan 6 Digit Kode OTP: ").strip()
+                            if user_otp:
+                                otp_input.fill(user_otp)
+                                time.sleep(0.5)
+                                otp_submit_btn.click()
+                                print("🚀 Kode OTP dikirim. Menunggu verifikasi...")
+                                time.sleep(3)
+                                continue
+                            else:
+                                print("ℹ️ Anda juga dapat mengisi kode OTP langsung di jendela Chrome yang terbuka.")
+
+                        # Tunggu pengguna menyelesaikan di browser jika input di terminal dilewati
                         while "sso.bps.go.id" in page.url and time.time() - start_time < timeout_seconds:
                             time.sleep(1)
                 except Exception:
@@ -224,18 +283,20 @@ def run_browser_login(username, password, headless=False):
         with open(COOKIE_FILE, "w", encoding="utf-8") as f:
             f.write(full_cookie_str)
 
-        print("✅ Cookie sesi terbaru berhasil diekstrak dan disimpan ke 'fresh_cookie.txt'!")
+        print("\n" + "=" * 60)
+        print("✅ COOKIE SESI TERBARU BERHASIL DISIMPAN KE 'fresh_cookie.txt'!")
+        print("=" * 60)
+
         context.close()
         return full_cookie_str, xsrf_token
 
-def get_valid_cookie(cli_user=None, cli_pass=None, survey_period_id=DEFAULT_SURVEY_PERIOD_ID, force_login=False, save_account=False):
+def get_valid_cookie(cli_user=None, cli_pass=None, cli_otp_secret=None, cli_otp="", survey_period_id=DEFAULT_SURVEY_PERIOD_ID, force_login=False, save_account=False):
     """
     Fungsi utama:
     1. Cek apakah fresh_cookie.txt sudah ada dan masih aktif.
     2. Jika aktif dan tidak force_login, langsung gunakan (tanpa buka browser!).
-    3. Jika tidak aktif, minta akun & kata sandi, lalu lakukan auto-login via browser.
+    3. Jika tidak aktif, minta akun, kata sandi, dan OTP, lalu lakukan auto-login via browser.
     """
-    # 1. Cek file cookie yang ada
     current_cookie = ""
     if COOKIE_FILE.exists() and not force_login:
         try:
@@ -254,25 +315,31 @@ def get_valid_cookie(cli_user=None, cli_pass=None, survey_period_id=DEFAULT_SURV
         else:
             print(f" [KEDALUWARSA / HTTP {status}]")
 
-    # 2. Jika tidak valid, jalankan auto login
     print("⚡ Memulai proses login otomatis SSO BPS...")
-    user, pwd = prompt_credentials(cli_user, cli_pass)
+    user, pwd, otp_sec = prompt_credentials(cli_user, cli_pass, cli_otp_secret)
     if not user or not pwd:
         print("❌ Login dibatalkan: akun atau kata sandi tidak diisi.")
         return None, None
 
-    cookie_str, xsrf = run_browser_login(user, pwd)
+    cookie_str, xsrf = run_browser_login(
+        username=user,
+        password=pwd,
+        otp_secret=otp_sec,
+        cli_otp=cli_otp
+    )
 
     if cookie_str and save_account:
-        save_credentials(user, pwd)
+        save_credentials(user, pwd, otp_sec)
 
     return cookie_str, xsrf
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Autentikasi Otomatis Fasih SM BPS")
+    parser = argparse.ArgumentParser(description="Autentikasi Otomatis Fasih SM BPS (Dengan Dukungan OTP)")
     parser.add_argument("-u", "--username", help="Username SSO BPS")
     parser.add_argument("-p", "--password", help="Password SSO BPS")
+    parser.add_argument("--otp", help="6 Digit Kode OTP langsung (Opsional)", default="")
+    parser.add_argument("--otp-secret", help="Secret Key Base32 Authenticator untuk auto-generate OTP (Opsional)", default="")
     parser.add_argument("--save", action="store_true", help="Simpan kredensial ke config_account.json")
     parser.add_argument("--force", action="store_true", help="Paksa login ulang meskipun cookie masih ada")
     args = parser.parse_args()
@@ -280,11 +347,13 @@ if __name__ == "__main__":
     c, x = get_valid_cookie(
         cli_user=args.username,
         cli_pass=args.password,
+        cli_otp_secret=args.otp_secret,
+        cli_otp=args.otp,
         force_login=args.force,
         save_account=args.save
     )
 
     if c:
-        print("\n✨ Siap digunakan untuk scraping data Fasih SM!")
+        print("\n✨ Sesi berhasil diperbarui dan siap digunakan!")
     else:
         sys.exit(1)

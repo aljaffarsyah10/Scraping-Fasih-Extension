@@ -113,35 +113,33 @@ Untuk membandingkan jumlah data di server BPS dengan file lokal kita per kecamat
 python scripts/compare_server_master.py
 ```
 
-### D. Autentikasi Otomatis & Penarikan Data (Tanpa Salin Cookie Manual)
-Kini Anda **tidak perlu lagi menyalin cookie manual dari DevTools browser**. Sistem telah dilengkapi modul `auth_manager.py` berbasis Playwright yang otomatis mengisikan akun SSO BPS:
+### D. Autentikasi Otomatis SSO BPS & Dukungan 2FA / OTP
+Kini Anda **tidak perlu lagi menyalin cookie manual dari DevTools browser**. Sistem telah dilengkapi modul `auth_manager.py` berbasis Playwright yang otomatis menangani autentikasi SSO BPS beserta verifikasi dua langkah (2FA / OTP):
 
 #### 1. Menjalankan Scraper dengan Prompt Interaktif:
-Cukup jalankan perintah berikut, lalu masukkan username dan password ketika diminta (password tersembunyi demi keamanan):
+Cukup jalankan perintah berikut, lalu masukkan username dan password ketika diminta (password disamarkan demi keamanan):
 ```bash
 python fasih_scraper.py --minimal
 ```
-*Jika cookie di `fresh_cookie.txt` masih aktif, scraper langsung berjalan instan tanpa membuka browser. Jika kedaluwarsa, browser Chrome otomatis terbuka untuk mengautentikasi dan menyimpan cookie baru.*
+*Jika terdeteksi halaman 2FA / OTP, konsol terminal akan meminta Anda memasukkan 6 digit kode dari Google Authenticator / FreeOTP di HP Anda, atau Anda dapat mengetikkannya langsung pada jendela Chrome yang terbuka.*
 
-#### 2. Menjalankan Scraper dengan Argumen Akun Langsung:
+#### 2. Auto-Generate OTP Otomatis 100% via Secret Key (Zero Friction):
+Jika Anda memiliki **Secret Key Base32** (kunci rahasia yang biasa diberikan saat awal memasang Authenticator di SSO BPS), sistem dapat **meng-generate kode OTP secara otomatis** tanpa Anda perlu membuka HP:
 ```bash
-python fasih_scraper.py -u "username_sso" -p "password_sso" --minimal
+python auth_manager.py -u "username_sso" -p "password_sso" --otp-secret "JBSWY3DPEHPK3PXP" --save
+```
+*Setelah tersimpan di `config_account.json` (lokal), setiap kali cookie kedaluwarsa sistem akan login dan mengisikan OTP secara otomatis tanpa interupsi!*
+
+#### 3. Menjalankan Scraper dengan Argumen Kode OTP Langsung:
+```bash
+python fasih_scraper.py -u "username_sso" -p "password_sso" --otp "123456" --minimal
 ```
 
-#### 3. Menyimpan Kredensial Lokal (Opsional):
-Jika tidak ingin mengetik akun berulang kali, simpan akun ke file lokal `config_account.json` (file ini otomatis diabaikan oleh `.gitignore` sehingga aman):
-```bash
-python auth_manager.py -u "username_sso" -p "password_sso" --save
-```
-Setelah tersimpan, Anda cukup menjalankan:
-```bash
-python fasih_scraper.py --minimal
-```
-atau
+#### 4. Menjalankan Harvester 100% Data:
 ```bash
 python scripts/harvest_100_percent_sitaro.py
 ```
-*Catatan: Jika akun BPS Anda mengaktifkan Verifikasi 2 Langkah (2FA / OTP), peramban Chrome akan terbuka dan menampilkan kolom OTP agar Anda dapat memasukkan 6 digit kode dari aplikasi Authenticator.*
+*Jika cookie di `fresh_cookie.txt` masih aktif, proses berjalan langsung tanpa membuka browser. Begitu kedaluwarsa, modul auto-login akan aktif secara otomatis.*
 
 ---
 
